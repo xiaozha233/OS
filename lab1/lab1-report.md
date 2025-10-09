@@ -28,8 +28,44 @@
 #### **练习1：理解内核启动中的程序入口操作**
 
 **1. 指令 `la sp, bootstacktop` 完成了什么操作，目的是什么？**
+*   **操作分析:**
+    `la sp, bootstacktop` 是一条RISC-V汇编伪指令，意为 "Load Address"。它将符号 `bootstacktop` 的内存地址加载到 `sp` (Stack Pointer) 寄存器中。在我们的代码里，`bootstacktop` 是通过链接脚本和汇编代码定义的一个标签，它指向我们为内核栈预留的内存空间的**顶部（最高地址处）**。
 
+    ```assembly
+    // kern/init/entry.S
+    .section .data
+        .align PGSHIFT 
+        .global bootstack 
+    bootstack:
+        .space KSTACKSIZE // 预留一块名为bootstack的内存，大小为KSTACKSIZE
+        .global bootstacktop 
+    bootstacktop: // bootstacktop标签紧随其后，即这块内存的末尾
+    ```
+
+*   **目的:**
+    这条指令的**核心目的是初始化内核的栈指针**。任何C语言函数的执行都依赖于栈的存在，用于存储局部变量、函数参数、返回地址等信息。RISC-V架构的栈是**向下生长**的（即从高地址向低地址扩展）。因此，在调用任何C函数之前，必须将`sp`寄存器指向一块合法、可用内存区域的顶端。`la sp, bootstacktop` 正是完成了这个至关重要的准备工作，为即将跳转到的C函数 `kern_init` 搭建了必要的运行环境。
+
+    **内核栈内存示意图:**
+    ```
+        低地址  ^
+                |
+    bootstack ->+-----------------+  <-- 栈 (Stack)
+                |                 |
+                |   KSTACKSIZE    |
+                |     字节        |
+                |                 |
+    bootstacktop->+-----------------+  <-- 栈顶 (Stack Top), sp初始指向这里
+                |
+        高地址  v
+    ```
 **2. 指令 `tail kern_init` 完成了什么操作，目的是什么？**
+*   **操作分析:**
+    `tail kern_init` 同样是一条伪指令，它会被汇编器翻译成一条**无条件跳转指令**（通常是`jal`或`jr`），直接将CPU的程序计数器（PC）设置为 `kern_init` 函数的起始地址。
+
+*   **目的:**
+    这条指令的**核心目的是将CPU的控制权从汇编代码 (`entry.S`) 安全地转移到C代码 (`kern_init`)**。
+    
+    值得注意的是，这里使用的是`tail`（尾调用），而不是常规的`call`。`call`指令会保存返回地址，期望被调用函数执行完毕后能返回。但`kern_entry`的使命在设置好栈并跳转后便已彻底完成，它**不期望`kern_init`返回**。使用`tail`进行跳转，避免了在栈上保存一个无用的返回地址，这是一种**尾调用优化**。它使得`kern_init`函数直接取代了`kern_entry`，成为函数调用栈的第一个（也是唯一的）栈帧，逻辑上更为清晰，也略微节省了栈空间。
 
 
 
