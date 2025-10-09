@@ -39,14 +39,14 @@
 
 *   **调试过程记录:**
     我们分别在两个终端输入make debug和make gdb命令启动调试：
-    ![alt text](74edd736fa6aec268ed0c192764b2e07.png)
-    ![alt text](de512e59f3995a90d75e0e8e25be13d6.png)
+    ![alt text](image/74edd736fa6aec268ed0c192764b2e07.png)
+    ![alt text](image/de512e59f3995a90d75e0e8e25be13d6.png)
     GDB成功连接后，显示程序暂停在地址 `0x0000000000001000 in ?? ()`。这表明，QEMU模拟的RISC-V硬件加电后，CPU执行的第一条指令位于物理地址 `0x1000`。
     我们使用 `x/5i 0x1000` 命令来反汇编该地址处的指令，得到的**实际输出**如下：
-    ![alt text](image.png)
+    ![alt text](image/image.png)
 
     为了验证完整的启动链，我们在内核的入口地址 `0x80200000` 处设置断点 `b *0x80200000`，然后输入 `c` 继续执行。程序正确地停在了`kern/init/entry.S`的`kern_entry`处，证明了从`0x1000`开始的固件最终成功将控制权交给了我们的内核：
-    ![alt text](image-1.png)
+    ![alt text](image/image-1.png)
 *   **问题回答:**
     **RISC-V 硬件加电后最初执行的几条指令位于什么地址？它们主要完成了哪些功能？**
     *   **地址:** 位于物理地址 **`0x1000`**。这是QEMU为该`virt`机器指定的硬件复位向量地址。
