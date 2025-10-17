@@ -2001,7 +2001,7 @@ ffffffffc0200ff2:	779c                	ld	a5,40(a5)
 ffffffffc0200ff4:	8782                	jr	a5
 
 ffffffffc0200ff6 <pmm_init>:
-    pmm_manager = &best_fit_pmm_manager;
+    pmm_manager = &best_fit_pmm_manager;  // 注释掉原来的
 ffffffffc0200ff6:	00001797          	auipc	a5,0x1
 ffffffffc0200ffa:	c1a78793          	addi	a5,a5,-998 # ffffffffc0201c10 <best_fit_pmm_manager>
     cprintf("memory management: %s\n", pmm_manager->name);
@@ -2017,7 +2017,7 @@ ffffffffc0201002:	f022                	sd	s0,32(sp)
     cprintf("memory management: %s\n", pmm_manager->name);
 ffffffffc0201004:	00001517          	auipc	a0,0x1
 ffffffffc0201008:	c4450513          	addi	a0,a0,-956 # ffffffffc0201c48 <best_fit_pmm_manager+0x38>
-    pmm_manager = &best_fit_pmm_manager;
+    pmm_manager = &best_fit_pmm_manager;  // 注释掉原来的
 ffffffffc020100c:	00004417          	auipc	s0,0x4
 ffffffffc0201010:	04c40413          	addi	s0,s0,76 # ffffffffc0205058 <pmm_manager>
 void pmm_init(void) {
@@ -2026,7 +2026,7 @@ ffffffffc0201016:	ec26                	sd	s1,24(sp)
 ffffffffc0201018:	e44e                	sd	s3,8(sp)
 ffffffffc020101a:	e84a                	sd	s2,16(sp)
 ffffffffc020101c:	e052                	sd	s4,0(sp)
-    pmm_manager = &best_fit_pmm_manager;
+    pmm_manager = &best_fit_pmm_manager;  // 注释掉原来的
 ffffffffc020101e:	e01c                	sd	a5,0(s0)
     cprintf("memory management: %s\n", pmm_manager->name);
 ffffffffc0201020:	92cff0ef          	jal	ra,ffffffffc020014c <cprintf>
@@ -2199,14 +2199,14 @@ ffffffffc0201180:	842ff0ef          	jal	ra,ffffffffc02001c2 <__panic>
     uintptr_t freemem = PADDR((uintptr_t)pages + sizeof(struct Page) * (npage - nbase));
 ffffffffc0201184:	00001617          	auipc	a2,0x1
 ffffffffc0201188:	b5460613          	addi	a2,a2,-1196 # ffffffffc0201cd8 <best_fit_pmm_manager+0xc8>
-ffffffffc020118c:	05e00593          	li	a1,94
+ffffffffc020118c:	05f00593          	li	a1,95
 ffffffffc0201190:	00001517          	auipc	a0,0x1
 ffffffffc0201194:	af050513          	addi	a0,a0,-1296 # ffffffffc0201c80 <best_fit_pmm_manager+0x70>
 ffffffffc0201198:	82aff0ef          	jal	ra,ffffffffc02001c2 <__panic>
         panic("DTB memory info not available");
 ffffffffc020119c:	00001617          	auipc	a2,0x1
 ffffffffc02011a0:	ac460613          	addi	a2,a2,-1340 # ffffffffc0201c60 <best_fit_pmm_manager+0x50>
-ffffffffc02011a4:	04600593          	li	a1,70
+ffffffffc02011a4:	04800593          	li	a1,72
 ffffffffc02011a8:	00001517          	auipc	a0,0x1
 ffffffffc02011ac:	ad850513          	addi	a0,a0,-1320 # ffffffffc0201c80 <best_fit_pmm_manager+0x70>
 ffffffffc02011b0:	812ff0ef          	jal	ra,ffffffffc02001c2 <__panic>
@@ -2214,7 +2214,7 @@ ffffffffc02011b0:	812ff0ef          	jal	ra,ffffffffc02001c2 <__panic>
 ffffffffc02011b4:	86ae                	mv	a3,a1
 ffffffffc02011b6:	00001617          	auipc	a2,0x1
 ffffffffc02011ba:	b2260613          	addi	a2,a2,-1246 # ffffffffc0201cd8 <best_fit_pmm_manager+0xc8>
-ffffffffc02011be:	07900593          	li	a1,121
+ffffffffc02011be:	07a00593          	li	a1,122
 ffffffffc02011c2:	00001517          	auipc	a0,0x1
 ffffffffc02011c6:	abe50513          	addi	a0,a0,-1346 # ffffffffc0201c80 <best_fit_pmm_manager+0x70>
 ffffffffc02011ca:	ff9fe0ef          	jal	ra,ffffffffc02001c2 <__panic>
