@@ -109,7 +109,11 @@ static slab_t* slab_create(kmem_cache_t *cache) {
 
 // 销毁一个 slab
 static void slab_destroy(kmem_cache_t *cache, slab_t *slab) {
-    // TODO: 第二步实现
+    // 1. 从 cache 的链表中移除该 slab
+    list_del(&slab->slab_link);
+    cache->num_slabs--;
+    // 2. 释放该 slab 占用的页面回 buddy 系统
+    pmm_manager->free_pages(slab->page, 1);
 }
 
 // 从 slab 中分配一个对象
@@ -267,22 +271,22 @@ void kmem_cache_destroy(kmem_cache_t *cache) {
 
 // ========== 通用分配接口 ==========
 
-    static kmem_cache_t* find_cache(size_t size) {
-        if (!caches_ready) {
-            cprintf("find_cache: caches not initialized\n");
-            return NULL;
-        }
-
-        for (int i = 0; i < NUM_SIZE_CACHES; i++) {
-            if (size <= size_cache_sizes[i]) {
-                return size_caches[i];
-            }
-        }
-
-        cprintf("find_cache: requested size %d exceeds maximum managed size %d\n",
-                (int)size, (int)size_cache_sizes[NUM_SIZE_CACHES - 1]);
+static kmem_cache_t* find_cache(size_t size) {
+    if (!caches_ready) {
+        cprintf("find_cache: caches not initialized\n");
         return NULL;
     }
+
+    for (int i = 0; i < NUM_SIZE_CACHES; i++) {
+        if (size <= size_cache_sizes[i]) {
+            return size_caches[i];
+        }
+    }
+
+    cprintf("find_cache: requested size %d exceeds maximum managed size %d\n",
+            (int)size, (int)size_cache_sizes[NUM_SIZE_CACHES - 1]);
+    return NULL;
+}
 
 void* kmalloc(size_t size) {
     cprintf("kmalloc: called with size=%d\n", (int)size);
@@ -376,16 +380,16 @@ static void slub_init_memmap(struct Page *base, size_t n) {
 
 static struct Page* slub_alloc_pages(size_t n) {
     cprintf("Warning: slub_alloc_pages called with n=%d\n", n);
-    return buddy_alloc_pages(n);  // 移除 extern 声明
+    return buddy_alloc_pages(n);  
 }
 
 static void slub_free_pages(struct Page *base, size_t n) {
     cprintf("Warning: slub_free_pages called\n");
-    buddy_free_pages(base, n);  // 移除 extern 声明
+    buddy_free_pages(base, n);
 }
 
 static size_t slub_nr_free_pages(void) {
-    return buddy_nr_free_pages();  // 移除 extern 声明
+    return buddy_nr_free_pages();
 }
 
 static void slub_check(void) {
