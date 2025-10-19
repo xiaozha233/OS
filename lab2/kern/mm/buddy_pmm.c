@@ -47,58 +47,74 @@ static inline void set_page_order(struct Page *page, size_t order) {
 }
 
 // 初始化 Buddy System
-static void buddy_init(void) {
-    // 初始化所有阶的空闲链表
+void buddy_init(void) {
+    cprintf("buddy_init: initializing buddy system\n");
+    
     for (int i = 0; i <= MAX_ORDER; i++) {
-        list_init(&free_list(i));
-        nr_free(i) = 0;
+        list_init(&free_area[i].free_list);
+        free_area[i].nr_free = 0;
+        cprintf("buddy_init: initialized free_area[%d]\n", i);
     }
+    
+    cprintf("buddy_init: completed\n");
 }
 
-// 初始化内存映射
-static void buddy_init_memmap(struct Page *base, size_t n) {
+// 将 buddy_init_memmap 改为非静态
+void buddy_init_memmap(struct Page *base, size_t n) {
+    cprintf("buddy_init_memmap: start, base=%p, n=%d\n", base, (int)n);
+    
     assert(n > 0);
+    buddy_base = base;
+    buddy_total_pages = n;
     
-    // 记录基地址
-    if (buddy_base == NULL) {
-        buddy_base = base;
-        buddy_total_pages = n;
-    }
+    cprintf("buddy_init_memmap: initializing page structures\n");
     
-    // 1. 初始化所有页的基本属性
-    struct Page *p = base;
-    for (; p != base + n; p++) {
+    // 初始化所有页面
+    for (size_t i = 0; i < n; i++) {
+        struct Page *p = base + i;
         assert(PageReserved(p));
         p->flags = 0;
         p->property = 0;
         set_page_ref(p, 0);
     }
     
-    // 2. 将整块内存按照 2 的幂次分解并加入对应的空闲链表
+    cprintf("buddy_init_memmap: page structures initialized, n=%d\n", (int)n);
+    cprintf("buddy_init_memmap: starting to create free blocks\n");
+    
+    // 将所有页面放入最大可能的空闲块
     size_t remaining = n;
     size_t offset = 0;
     
     while (remaining > 0) {
-
-        // 找到最大的能装下的 2 的幂次，从大到小开始分配
-        size_t order = 0;
-        size_t size = 1;
-        
-        while (size * 2 <= remaining && order < MAX_ORDER) {
-            size <<= 1;
-            order++;
+        // 找到最大的可以容纳的 order
+        size_t order = MAX_ORDER;
+        while (order > 0 && (1UL << order) > remaining) {
+            order--;
         }
         
-        // 将这块内存加入对应的空闲链表
-        p = base + offset;
-        set_page_order(p, order);
-        SetPageProperty(p);
-        list_add(&free_list(order), &(p->page_link));
+        cprintf("buddy_init_memmap: remaining=%d, order=%d, block_size=%d\n", 
+                (int)remaining, (int)order, (int)(1UL << order));
+        
+        struct Page *block = base + offset;
+        block->property = order;
+        SetPageProperty(block);
+        
+        cprintf("buddy_init_memmap: about to add block to free_area[%d]\n", (int)order);
+        cprintf("buddy_init_memmap: free_area[%d].free_list = {prev=%p, next=%p}\n",
+                (int)order, free_area[order].free_list.prev, free_area[order].free_list.next);
+        
+        list_add(&free_area[order].free_list, &(block->page_link));
+        
+        cprintf("buddy_init_memmap: block added successfully\n");
+        
         nr_free(order)++;
         
-        offset += size;
-        remaining -= size;
+        size_t block_size = 1UL << order;
+        remaining -= block_size;
+        offset += block_size;
     }
+    
+    cprintf("buddy_init_memmap: completed successfully\n");
 }
 
 // 辅助函数:从指定阶获取一个空闲块(如果有)
@@ -140,7 +156,7 @@ static void buddy_split(struct Page *page, size_t current_order, size_t target_o
 }
 
 // 分配页面
-static struct Page *buddy_alloc_pages(size_t n) {
+struct Page *buddy_alloc_pages(size_t n) {
     assert(n > 0);
     
     // 1. 计算需要的阶
@@ -198,9 +214,9 @@ static int is_buddy(struct Page *page, struct Page *buddy, struct Page *base, si
 }
 
 // 完整的释放函数,带伙伴合并
-static void buddy_free_pages(struct Page *base, size_t n) {
+void buddy_free_pages(struct Page *base, size_t n) {
     assert(n > 0);
-    assert(buddy_base != NULL);
+    assert(base >= buddy_base && base < buddy_base + buddy_total_pages);
     
     // 1. 重置页面属性
     struct Page *p = base;
@@ -253,7 +269,7 @@ static void buddy_free_pages(struct Page *base, size_t n) {
 }
 
 // 获取空闲页面数
-static size_t buddy_nr_free_pages(void) {
+size_t buddy_nr_free_pages(void) {
     size_t total = 0;
     for (int i = 0; i <= MAX_ORDER; i++) {
         total += nr_free(i) * (1 << i);

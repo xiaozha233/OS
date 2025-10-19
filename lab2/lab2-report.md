@@ -49,622 +49,15 @@ First-Fit (首次适应) 算法的实现位于 `kern/mm/default_pmm.c` 中，其
 
 3.  **`default_alloc_pages(size_t n)`**:
     *   **作用**：实现 First-Fit 算法的**分配**逻辑。
-    *   **过程**：
-        a. 首先断言 `n > 0` 并检查请求的页数 `n` 是否超过当前总空闲页数 `nr_free`，若超过则无法分配，返回 `NULL`。
-        b. 从 `free_list` 的头节点开始，**顺序遍历**整个空闲块链表。
-        c. 对于每一个空闲块的头页 `p`，检查其大小 `p->property` 是否大于等于请求的大小 `n`。
-        d. **一旦找到第一个满足条件的块**，就立即停止搜索（`break`）。
-        e. 如果找到了这样的块 `page`：
-            i.  将其从 `free_list` 中移除。
-            ii. **判断是否需要分裂**：如果 `page->property > n`，说明这个块比需要的大。此时，将 `page` 之后的第 `n` 个页（即 `page + n`）设置为一个新的空闲块的头部，其大小为 `page->property - n`，并将其插回 `free_list`。
-            iii. 更新总空闲页数 `nr_free -= n`。
-            iv. 清除被分配出去的块 `page` 的 `PG_property` 标志位。
-        f. 返回分配到的块的起始 `Page` 结构体指针 `page`。
+    ### 扩展练习Challenge1：buddy system（伙伴系统）分配算法（需要编程）
 
-4.  **`default_free_pages(struct Page *base, size_t n)`**:
-    *   **作用**：实现 First-Fit 算法的**释放与合并**逻辑。
-    *   **过程**：
-        a. 首先，将被释放的 `n` 个页 `base` 标记为一个大小为 `n` 的新空闲块（设置 `property` 和 `PG_property`）。
-        b. 将这个新空闲块按地址顺序插入到 `free_list` 中。
-        c. **执行合并操作**：这是减少内存碎片的关键。
-            i.  **向前合并**：检查新插入块 `base` 在链表中的**前一个**块 `p`。如果 `p` 和 `base` 在物理上是连续的（即 `p + p->property == base`），则将它们合并：将 `p` 的大小增加 `n`（`p->property += base->property`），并把 `base` 的节点从链表中删除。
-            ii. **向后合并**：检查（可能已经合并过的）块 `base` 在链表中的**后一个**块 `p`。如果它们在物理上是连续的（即 `base + base->property == p`），则再次合并：将 `base` 的大小增加 `p` 的大小，并把 `p` 的节点从链表中删除。
-        d. 更新总空闲页数 `nr_free += n`。
+    本组将 `pmm_manager` 切换至自研的 buddy 分配器，通过“2^k 粒度 + 伙伴合并”达到快速回收与低外碎片的目标：
 
+    - 初始化时按最大可容纳的 2^k 块拆分空闲区，填充 `free_area[0..MAX_ORDER]`；
+    - `alloc_pages` 计算目标阶并自顶向下拆分，`free_pages` 以 XOR 定位伙伴并循环合并；
+    - 自检覆盖基本分配、伙伴合并、边界条件与压力场景，QEMU 日志中可见 “Buddy System Comprehensive Test” 全部通过。
 
-#### **2. First-Fit 算法的改进空间** 
-
-
-
-### **练习2：实现 Best-Fit 连续物理内存分配算法（需要编程）**
-
-#### **1. 设计实现过程**
-Best-Fit (最佳适应) 算法的目标是选择一个能满足请求、并且大小与请求大小最接近的空闲块，以期保留下更大的连续空闲块，减少因分裂产生的小碎片。
-
-我们实现过程如下：
-
-1.  在  `pmm.c` 中进行相应修改，将默认的物理内存管理器指向 `best_fit_pmm_manager`。
-
-2.  Best-Fit 的核心改动仅在于**分配策略**。因此，`best_fit_init`、`best_fit_init_memmap` 和 `best_fit_free_pages` 函数的逻辑与 First-Fit 完全相同，可以直接复用。这是因为空闲链表的组织方式（按地址排序）和释放时的合并逻辑，与分配时如何选择块是解耦的。
-
-3.  **重写分配函数 `best_fit_alloc_pages`**: 这是本次编程的核心。
-    *   初始化两个变量：`struct Page *best_fit = NULL;` 用来记录当前找到的最佳块，`unsigned int min_size = nr_free + 1;` (或一个足够大的数) 用来记录最佳块的大小。
-    *   与 First-Fit 不同，Best-Fit **必须遍历整个空闲链表**，而不能找到第一个就停止。
-    *   在循环中，对于每个空闲块 `p`，进行判断：
-        *   如果 `p->property >= n` (满足大小要求)
-        *   并且 `p->property < min_size` (比当前找到的“最佳”块更“小”，即更接近)
-        *   则更新 `best_fit = p;` 和 `min_size = p->property;`。
-    *   循环结束后，`best_fit` 指针就指向了全局最优的那个块。
-    *   后续的分裂、链表操作、更新计数器等逻辑，与 First-Fit 完全一致，只需将操作对象从 `page` 换成 `best_fit` 即可。
-
-
-#### **2. 阐述代码如何分配和释放物理内存**
-*   **分配 (`best_fit_alloc_pages`)**：
-    当请求分配 `n` 页时，代码会扫描**所有**的空闲块。它会记住那个大小不小于 `n` 但又是所有满足条件的块中**最小**的一个。例如，如果空闲块有 {5页, 10页, 20页}，请求分配 4 页，Best-Fit 会选择 5 页的那个块。找到这个“最佳”块后，如果它的大小恰好为 `n`，则整个分配；如果大于 `n`，则分裂成 `n` 页（分配出去）和 `(size - n)` 页（作为新的更小的空闲块放回链表）。
-
-*   **释放 (`best_fit_free_pages`)**：
-    释放过程与 First-Fit 完全一样。当一块内存被释放时，代码会将其作为一个新的空闲块，并按其物理地址插入到空闲链表中。然后，它会检查这个新块是否能和它在物理地址上相邻的前一个或后一个空闲块合并。如果可以，就将它们合并成一个更大的连续空闲块。这个合并过程是减少外部碎片的关键，它与分配策略无关。
-
-
-
-#### **3. Best-Fit 算法的改进空间** `[S26]`
-Best-Fit 算法主要可以在性能和碎片两个方面进行改进：
-
-1.  **性能瓶颈**：其最大的缺点是**性能开销大**。每次分配都必须遍历整个空闲链表，导致分配操作的时间复杂度为 O(N)。在空闲块数量很多时，这会成为系统瓶颈。
-
-2.  **碎片问题**：虽然 Best-Fit 的初衷是减少碎片，但它倾向于产生大量**极小的、几乎无法再利用的碎片**。因为它总是找最接近的块，分配后剩下的部分（如果分裂的话）会非常小。
-
-3.  **改进方向**：
-    *   **性能优化**：最有效的改进是更换数据结构。不再使用按地址排序的链表，而是使用**按大小排序**的数据结构，例如**平衡二叉搜索树**或**跳表**。这样，查找最佳匹配块的时间复杂度可以从 O(N) 降低到 O(logN)。但这会使得合并操作变得复杂，因为合并时需要从树中移除两个节点，再插入一个新节点。
-    *   **结合多级链表**：可以借鉴 Buddy System 或 Slub 的思想，将空闲块按大小分类，维护多个链表。在每个链表内部，可以按地址排序。这样，分配时先找到合适大小的链表，再在其中应用 Best-Fit，缩小了搜索范围。
-
-
-
-## **三、 实验知识点理解**
-
-#### **1. 实验中重要的知识点与OS原理的对应**
-
-| 实验知识点                          | OS 原理中的知识点           | 关系与理解                                                                                                                                                                                                                |
-| :----------------------------- | :------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **`entry.S` 中建立页表并开启分页**       | **内存管理单元(MMU)与分页机制** | **关系**：`entry.S` 的代码是 OS 原理中“启动分页模式”这一抽象概念的具体硬件实现。**理解**：原理告诉我们，需要加载页表基址到特定寄存器（如 `CR3` 或 `satp`）来启用 MMU。实验则展示了如何在 RISC-V 架构下，精确地构造一个 PTE、计算页表的物理地址、写入 `satp` 寄存器并刷新 TLB (`sfence.vma`)。这揭示了理论与硬件指令集之间的直接联系。          |
-| **`struct Page` 与 `pages` 数组** | **物理内存的页帧管理**        | **关系**：`struct Page` 是对物理页帧（Page Frame）这一理论概念的数据结构化描述。**理解**：原理中，OS 需要一个数据结构来追踪每个物理页帧的状态（空闲、已分配、被哪个进程使用等）。实验中的 `pages` 数组就是这个核心数据结构，它为每一个物理页都创建了一个“档案”，通过 `flags`, `ref`, `property` 等字段记录其状态，是所有物理内存管理算法的基础。        |
-| **First-Fit/Best-Fit 算法实现**    | **连续内存分配算法**         | **关系**：实验中的 `default_pmm.c` 和 `best_fit_pmm.c` 是对教科书中 First-Fit 和 Best-Fit 算法的直接编码实现。**理解**：原理课上学习的是算法的逻辑和伪代码。实验则让我们处理了所有工程细节：如何用双向链表组织空闲块、如何在分裂后维护链表、如何在释放时高效地检查并合并相邻块。这让我们认识到，一个看似简单的算法在实际系统中也需要精巧的数据结构和边界条件处理来支撑。 |
-| **多级页表与大页 (Giga Page)**        | **多级页表与 TLB 优化**     | **关系**：实验中为内核映射建立的 1GiB 大页，是多级页表理论在实践中的一种高效应用。**理解**：原理告诉我们多级页表可以节省空间，但也增加了访存开销。大页机制（Superpage）是解决这个开销的有效手段。通过在 L2 级页表就设置一个叶子节点，实验展示了如何用一个 PTE 就映射 1GiB 内存，这不仅极大简化了内核的初始页表，也减少了 TLB 的压力，提高了内核地址翻译的效率。                |
-
-
-
-#### **2. OS 原理中很重要但在实验中未体现的知识点**
-1.  **缺页中断 (Page Fault) 与页面置换算法**：这是虚拟内存管理最核心的部分。当程序访问一个有效但当前不在物理内存中的虚拟页时，会触发缺页中断。本次实验只涉及了物理内存的分配，完全没有处理物理内存耗尽的情况。因此，像 **LRU、FIFO、Clock** 等经典的页面置환算法没有得到体现。
-
-2.  **按需分页 (Demand Paging) 与交换空间 (Swapping)**：现代 OS 并不会在程序启动时就将其所有页面都加载到内存，而是在第一次访问时才通过缺页中断调入。这个机制以及与之配套的、将内存页换出到磁盘交换空间（Swap Space）的功能，在本次实验中没有涉及。
-
-3.  **写时复制 (Copy-on-Write, COW)**：这是一个在 `fork()` 系统调用中用于优化性能和节省内存的关键技术。父子进程在 `fork()` 后会共享只读的物理页面，只有当其中一方尝试写入时，才会触发保护性缺页中断，真正复制一份新的页面。这个高级内存管理技巧在实验中未出现。
-
-4.  **用户态进程的地址空间管理**：本次实验的焦点是内核自身的内存管理和初始化。如何为一个用户进程创建和管理其独立的、包含代码段、数据段、堆、栈的完整虚拟地址空间（`mm_struct`），以及如何在进程切换时切换页表（修改 `satp`），这些面向用户进程的内存管理核心内容尚未涉及。
-
-
-### 扩展练习Challenge1：buddy system（伙伴系统）分配算法（需要编程）
-
-#### **1. Buddy System 算法原理与设计思路**
-
-##### **1.1 算法核心思想**
-
-Buddy System（伙伴系统）是一种经典的物理内存分配算法，其核心思想是：
-- **内存分块**: 将整个可管理的内存看作一个大小为 2^M 的大块，并只允许分配大小为 2^k 的块（k ≤ M）
-- **递归分裂**: 当需要较小的块时，将大块递归地二等分，直到得到合适大小
-- **快速合并**: 每个块都有一个唯一的"伙伴"（buddy），释放时通过位运算 O(1) 定位伙伴并尝试合并
-
-
-##### **1.2 关键数据结构**
-
-```c
-#define MAX_ORDER 10  // 支持最大 2^10 = 1024 页
-
-// 核心数据结构：多个空闲链表，每个对应一个阶
-static free_area_t free_area[MAX_ORDER + 1];
-
-// 全局信息记录
-static struct Page *buddy_base = NULL;      // 内存起始地址
-static size_t buddy_total_pages = 0;        // 总页数
-
-// Page 结构复用 property 字段存储块的阶
-// property: 该块的阶数（order），表示块大小为 2^order 页
-```
-
-**数据结构说明**：
-- `free_area[i]`: 维护所有大小为 2^i 页的空闲块链表
-- `property`: 每个块的首页记录该块的阶数（复用原有字段）
-- `buddy_base`: 计算伙伴地址的基准地址
-
-##### **1.3 伙伴地址计算的数学魔法**
-
-Buddy System 最精妙之处在于**伙伴地址计算公式**：
-
-```c
-buddy_idx = current_idx ^ (1 << order)
-```
-
-这个异或（XOR）操作神奇地实现了：
-- 如果当前块是"左伙伴"，计算出"右伙伴"地址
-- 如果当前块是"右伙伴"，计算出"左伙伴"地址
-
-**示例**（假设页索引，order=1 表示 2 页块）：
-```
-块地址 = 4, order=1:  伙伴地址 = 4 ^ 2 = 6  (4 和 6 是一对 2 页块伙伴)
-块地址 = 6, order=1:  伙伴地址 = 6 ^ 2 = 4  (互为伙伴)
-块地址 = 4, order=2:  伙伴地址 = 4 ^ 4 = 0  (4 和 0 是一对 4 页块伙伴)
-```
-
-#### **2. 核心算法实现**
-
-##### **2.1 初始化过程 (`buddy_init_memmap`)**
-
-初始化时需要将整块可用内存分解为 2 的幂次大小的块：
-
-```c
-static void buddy_init_memmap(struct Page *base, size_t n) {
-    assert(n > 0);
-    
-    // 记录全局信息
-    if (buddy_base == NULL) {
-        buddy_base = base;
-        buddy_total_pages = n;
-    }
-    
-    // 1. 初始化所有页的基本属性
-    struct Page *p = base;
-    for (; p != base + n; p++) {
-        assert(PageReserved(p));
-        p->flags = 0;
-        p->property = 0;
-        set_page_ref(p, 0);
-    }
-    
-    // 2. 将整块内存按 2 的幂次分解
-    size_t remaining = n;
-    size_t offset = 0;
-    
-    while (remaining > 0) {
-        // 找到最大的能装下的 2 的幂次
-        size_t order = 0;
-        size_t size = 1;
-        
-        while (size * 2 <= remaining && order < MAX_ORDER) {
-            size <<= 1;
-            order++;
-        }
-        
-        // 将这块加入对应的空闲链表
-        p = base + offset;
-        set_page_order(p, order);
-        SetPageProperty(p);
-        list_add(&free_list(order), &(p->page_link));
-        nr_free(order)++;
-        
-        offset += size;
-        remaining -= size;
-    }
-}
-```
-
-**初始化示例**（假设有 100 页）：
-```
-100 = 64 + 32 + 4
-初始化后:
-  free_list[6]: 1个 64页块
-  free_list[5]: 1个 32页块
-  free_list[2]: 1个 4页块
-```
-
-##### **2.2 分配算法 (`buddy_alloc_pages`)**
-
-**算法流程**：
-1. 计算所需阶：order = ⌈log₂(n)⌉
-2. 从 order 开始向上查找第一个非空链表
-3. 如果找到的块过大，递归分裂直到合适大小
-
-```c
-static struct Page *buddy_alloc_pages(size_t n) {
-    assert(n > 0);
-    
-    // 1. 计算需要的阶
-    size_t order = calculate_order(n);
-    if (order > MAX_ORDER) return NULL;
-    
-    // 2. 从目标阶开始向上查找空闲块
-    size_t current_order = order;
-    
-    while (current_order <= MAX_ORDER) {
-        if (!list_empty(&free_list(current_order))) {
-            // 找到了！取出这个块
-            list_entry_t *le = list_next(&free_list(current_order));
-            struct Page *page = le2page(le, page_link);
-            
-            list_del(le);
-            nr_free(current_order)--;
-            ClearPageProperty(page);
-            
-            // 3. 如果块太大，需要分裂
-            if (current_order > order) {
-                buddy_split(page, current_order, order);
-            }
-            
-            set_page_order(page, order);
-            return page;
-        }
-        current_order++;
-    }
-    
-    return NULL;  // 内存不足
-}
-```
-
-**分裂过程 (`buddy_split`)**：
-```c
-static void buddy_split(struct Page *page, size_t current_order, size_t target_order) {
-    // 从 current_order 分裂到 target_order
-    while (current_order > target_order) {
-        current_order--;
-        
-        // 伙伴是当前块的后半部分
-        size_t size = 1 << current_order;
-        struct Page *buddy = page + size;
-        
-        // 设置伙伴属性并加入链表
-        set_page_order(buddy, current_order);
-        SetPageProperty(buddy);
-        list_add(&free_list(current_order), &(buddy->page_link));
-        nr_free(current_order)++;
-    }
-    
-    set_page_order(page, target_order);
-}
-```
-
-**分配示例**（请求 3 页）：
-```
-请求 3 页 → 需要 order=2 (4页块)
-
-初始状态:
-  free_list[5]: [32页块]
-
-分配过程:
-  1. 从 free_list[5] 取出 32页块
-  2. 分裂: 32页 → 2个16页块
-     - 一个16页块加入 free_list[4]
-     - 另一个继续分裂
-  3. 分裂: 16页 → 2个8页块
-     - 一个8页块加入 free_list[3]
-     - 另一个继续分裂
-  4. 分裂: 8页 → 2个4页块
-     - 一个4页块加入 free_list[2]
-     - 另一个4页块返回给用户
-
-结果:
-  分配出 4 页（浪费 1 页，内部碎片率 25%）
-  free_list[4]: [16页块]
-  free_list[3]: [8页块]
-  free_list[2]: [4页块]
-```
-
-##### **2.3 释放与合并算法 (`buddy_free_pages`)**
-
-**算法流程**：
-1. 计算释放块的阶
-2. 尝试向上合并：不断查找伙伴，如果伙伴空闲且同阶，则合并
-3. 将最终合并后的块加入对应链表
-
-```c
-static void buddy_free_pages(struct Page *base, size_t n) {
-    assert(n > 0);
-    assert(buddy_base != NULL);
-    
-    // 1. 重置页面属性
-    struct Page *p = base;
-    for (; p != base + n; p++) {
-        assert(!PageReserved(p) && !PageProperty(p));
-        p->flags = 0;
-        set_page_ref(p, 0);
-    }
-    
-    // 2. 计算释放块的阶
-    size_t order = calculate_order(n);
-    struct Page *page = base;
-    
-    // 3. 向上合并
-    while (order <= MAX_ORDER) {
-        // 计算伙伴地址（神奇的 XOR）
-        size_t page_idx = page - buddy_base;
-        size_t buddy_idx = page_idx ^ (1 << order);
-        
-        // 检查伙伴是否有效
-        if (buddy_idx >= buddy_total_pages) {
-            break;  // 伙伴超出范围
-        }
-        
-        struct Page *buddy = buddy_base + buddy_idx;
-        
-        // 检查伙伴是否空闲且同阶
-        if (!PageProperty(buddy) || get_page_order(buddy) != order) {
-            break;  // 伙伴不满足合并条件
-        }
-        
-        // 找到了！从链表移除伙伴
-        list_del(&(buddy->page_link));
-        nr_free(order)--;
-        ClearPageProperty(buddy);
-        
-        // 合并：取地址较小的作为合并后的块
-        if (page > buddy) {
-            page = buddy;
-        }
-        
-        order++;  // 进入下一阶继续尝试合并
-    }
-    
-    // 4. 将最终块加入对应链表
-    set_page_order(page, order);
-    SetPageProperty(page);
-    list_add(&free_list(order), &(page->page_link));
-    nr_free(order)++;
-}
-```
-
-**合并示例**：
-```
-初始状态:
-  free_list[2]: [4页块A(地址4)]
-  已分配: [4页块B(地址0)]
-
-释放 4页块B:
-  Step 1: 计算伙伴地址 = 0 ^ 4 = 4
-          检查地址4的块A: 空闲 ✓, order=2 ✓
-          合并成 8页块(地址0)
-          
-  Step 2: 计算新伙伴地址 = 0 ^ 8 = 8
-          检查地址8的块: 不存在或已分配 ✗
-          停止合并
-          
-结果:
-  free_list[3]: [8页块(地址0)]
-```
-
-#### **3. 完整测试方案**
-
-我们设计了 8 个测试用例验证实现的正确性：
-
-##### **Test 1: 基本分配与释放**
-```c
-// 测试单页、多页、2的幂次分配
-struct Page *p0 = alloc_page();           // 1页
-struct Page *p1 = alloc_pages(5);         // 请求5页 → 分配8页
-struct Page *p2 = alloc_pages(16);        // 16页
-
-assert(get_page_order(p1) == 3);          // 2^3 = 8
-assert(get_page_order(p2) == 4);          // 2^4 = 16
-
-free_page(p0);
-free_pages(p1, 5);
-free_pages(p2, 16);
-```
-
-**验证点**: 
-- ✓ 非 2 的幂次向上取整
-- ✓ 分配和释放操作正确
-
-##### **Test 2: 分裂机制验证**
-```c
-size_t free_before = buddy_nr_free_pages();
-
-struct Page *p1 = alloc_page();
-struct Page *p2 = alloc_page();
-struct Page *p3 = alloc_page();
-
-free_page(p1);
-free_page(p2);
-free_page(p3);
-
-size_t free_after = buddy_nr_free_pages();
-assert(free_before == free_after);
-```
-
-**验证点**: 
-- ✓ 大块正确分裂为小块
-- ✓ 释放后总空闲页数不变
-
-##### **Test 3 & 3.5: 伙伴合并机制**
-
-这是最关键的测试，验证合并算法的正确性。
-
-**Test 3 - 自然合并测试**：
-```c
-// 先分配大块再释放，确保结构可控
-struct Page *p_large = alloc_pages(4);
-free_pages(p_large, 4);
-
-// 分配两个2页块（它们可能是伙伴）
-struct Page *p0 = alloc_pages(2);
-struct Page *p1 = alloc_pages(2);
-
-// 计算是否为伙伴
-size_t idx0 = p0 - buddy_base;
-size_t idx1 = p1 - buddy_base;
-size_t buddy_distance = idx0 ^ idx1;
-
-if (buddy_distance == 2) {  // order=1 的伙伴
-    // 释放应该合并
-    free_pages(p0, 2);
-    free_pages(p1, 2);
-    // 验证 free_list[2] 中出现新的 4页块
-}
-```
-
-**Test 3.5 - 强制伙伴合并**：
-```c
-// 分配 8 页 → 分裂成两个 4 页 → 释放应合并回 8 页
-struct Page *p_big = alloc_pages(8);
-free_pages(p_big, 8);
-
-struct Page *p4_1 = alloc_pages(4);  // 左半边
-struct Page *p4_2 = alloc_pages(4);  // 右半边（必定是伙伴）
-
-size_t nr_order3_before = nr_free(3);  // 记录 8页块数量
-
-free_pages(p4_1, 4);
-free_pages(p4_2, 4);
-
-size_t nr_order3_after = nr_free(3);
-assert(nr_order3_after > nr_order3_before);  // 应该多了一个 8页块
-```
-
-**验证点**: 
-- ✓ XOR 计算伙伴地址正确
-- ✓ 伙伴合并逻辑正确
-- ✓ 链表操作正确
-
-##### **Test 4: 边界条件**
-```c
-// 测试最大分配
-struct Page *p_max = alloc_pages(1 << MAX_ORDER);  // 2^10 = 1024页
-if (p_max != NULL) {
-    free_pages(p_max, 1 << MAX_ORDER);
-}
-
-// 测试超限分配
-struct Page *p_huge = alloc_pages((1 << MAX_ORDER) + 1);
-assert(p_huge == NULL);  // 应该返回 NULL
-```
-
-**验证点**: 
-- ✓ 最大块分配处理
-- ✓ 超限请求正确拒绝
-
-##### **Test 5: 内存碎片分析**
-```c
-// 显示各阶空闲块分布
-for (int i = 0; i <= MAX_ORDER; i++) {
-    if (nr_free(i) > 0) {
-        cprintf("Order %d (2^%d=%d pages): %d blocks\n",
-                i, i, 1 << i, nr_free(i));
-    }
-}
-
-// 计算内部碎片率
-struct Page *p = alloc_pages(3);  // 请求 3 页
-size_t actual = 1 << get_page_order(p);  // 实际分配 4 页
-double waste = (double)(actual - 3) / actual * 100;  // 25% 浪费
-```
-
-**验证点**: 
-- ✓ 链表结构完整性
-- ✓ 内部碎片量化
-
-##### **Test 6: 压力测试**
-```c
-#define STRESS_ROUNDS 20
-struct Page *pages[STRESS_ROUNDS];
-
-// 随机分配
-for (int i = 0; i < STRESS_ROUNDS; i++) {
-    pages[i] = alloc_pages((i % 8) + 1);
-}
-
-// 全部释放
-for (int i = 0; i < STRESS_ROUNDS; i++) {
-    if (pages[i] != NULL) {
-        free_pages(pages[i], (i % 8) + 1);
-    }
-}
-
-// 验证无内存泄漏
-assert(free_before == free_after);
-```
-
-**验证点**: 
-- ✓ 大量分配/释放的稳定性
-- ✓ 无内存泄漏
-
-##### **Test 7: 算法对比**
-
-展示 Buddy System 的内部碎片特性：
-
-```c
-请求  1 页 → 分配  1 页 (浪费  0 页,  0.0%)
-请求  3 页 → 分配  4 页 (浪费  1 页, 25.0%)
-请求  5 页 → 分配  8 页 (浪费  3 页, 37.5%)
-请求  7 页 → 分配  8 页 (浪费  1 页, 12.5%)
-
-权衡:
-  ✓ Buddy: 快速 O(1) 合并
-  ✗ Buddy: ~20% 内部碎片
-  ✓ First-Fit: 无内部碎片
-  ✗ First-Fit: 慢速 O(N) 合并
-```
-
-##### **Test 8: 伙伴地址计算验证**
-```c
-// 验证 XOR 计算的正确性
-for (size_t order = 0; order <= 4; order++) {
-    size_t idx = 8;
-    size_t buddy_idx = idx ^ (1 << order);
-    cprintf("Order %d: idx=%d ^ 2^%d=%d → buddy_idx=%d\n",
-            order, idx, order, 1 << order, buddy_idx);
-}
-
-输出:
-Order 0: idx= 8 ^ 2^0= 1 → buddy_idx= 9
-Order 1: idx= 8 ^ 2^1= 2 → buddy_idx=10
-Order 2: idx= 8 ^ 2^2= 4 → buddy_idx=12
-Order 3: idx= 8 ^ 2^3= 8 → buddy_idx= 0
-Order 4: idx= 8 ^ 2^4=16 → buddy_idx=24
-```
-
-#### **4. 测试结果与性能分析**
-
-##### **4.1 测试输出示例**
-
-```
-=== Buddy System Comprehensive Test ===
-
-[Test 1] Basic Allocation and Free
-  ✓ Single page allocation: 0xffffffffc0206000
-  ✓ 5 pages requested → allocated 2^3=8 pages: 0xffffffffc0206028
-  ✓ 16 pages (power of 2) allocation: 0xffffffffc0206128
-  ✓ All pages freed successfully
-
-[Test 2] Block Splitting Mechanism
-  ✓ Three pages allocated
-  ✓ Splitting verified, free pages restored: 32760
-
-[Test 3] Buddy Coalescing
-  Allocated 4-page block: 0xffffffffc0206000
-  Freed 4-page block
-  Allocated two 2-page blocks:
-    p0: 0xffffffffc0206000 (idx=0, order=1)
-    p1: 0xffffffffc0206050 (idx=2, order=1)
-    Distance (XOR): 2
-  ℹ These blocks ARE buddies, expect merge
-  free_list[1] before freeing: 0 blocks
-  free_list[1] after freeing: 0 blocks
-  free_list[2] after freeing: 1 blocks
-  ✓ Coalescing completed
-  ✓ Total free pages restored: 32760
-
-[Test 3.5] Forced Buddy Coalescing
-  Allocated 8-page block: 0xffffffffc0206000
-  Split into two 4-page blocks:
-    Block 1: 0xffffffffc0206000 (idx=0)
-    Block 2: 0xffffffffc0206100 (idx=4)
-    XOR distance: 4 (expect 4)
-  Before freeing: order2=0, order3=0
-  After freeing:  order2=0, order3=1
-  ✓ Successfully merged back to 8-page block!
-
-...
-
-=== All Tests Passed! ===
-🎉 Buddy System implementation verified!
-```
+    架构细节、关键伪代码与测试矩阵详见 `design_buddy.md`。
 
 ##### **4.2 性能对比分析**
 
@@ -716,14 +109,14 @@ Order 4: idx= 8 ^ 2^4=16 → buddy_idx=24
 ##### **适用场景**
 
 **推荐使用**：
-- ✅ 需要频繁分配/释放的场景（如页面交换）
-- ✅ 需要保持大块内存可用性（如大规模 DMA）
-- ✅ 对合并速度有严格要求的实时系统
+- 需要频繁分配/释放的场景（如页面交换）
+- 需要保持大块内存可用性（如大规模 DMA）
+- 对合并速度有严格要求的实时系统
 
 **不推荐使用**：
-- ❌ 内存极度紧张的嵌入式系统
-- ❌ 分配请求普遍为奇数页的场景
-- ❌ 对空间利用率要求极高的场景
+- 内存极度紧张的嵌入式系统
+- 分配请求普遍为奇数页的场景
+- 对空间利用率要求极高的场景
 
 
 
@@ -758,19 +151,26 @@ Order 4: idx= 8 ^ 2^4=16 → buddy_idx=24
 这些经验对理解现代操作系统的内存管理机制具有重要意义。
 
 ---
+### 扩展练习Challenge2:
+
+本组在 `buddy_pmm` 之上实现了一个轻量级的 SLUB 对象分配器，用于优化小对象频繁分配场景。
+
+- 初始化阶段重置缓存池、调用 `buddy_init`，并通过 `kmem_cache_create` 建立 16~2048B 的固定尺寸缓存；
+- 每个 `kmem_cache_t` 以单页 slab 为粒度，页首保存 `slab_t` 元数据，空闲对象通过单向链表串接；
+- `kmalloc/kfree` 通过 `size_caches` 快速定位合适缓存，再复用 `kmem_cache_alloc/free` 完成对象管理，自检用例全部通过。
+
+更完整的结构与流程说明见 `design_slub.md` 设计文档。
 
 
 ### 扩展练习Challenge3：
 
-## **知识卡片:无先验知识的物理内存探测** `[S29]`
-
-### **问题定义**
+#### **问题定义**
 
 在缺乏固件接口(如 Device Tree Blob 或 BIOS/UEFI 内存映射表)的情况下,操作系统内核需要自主确定系统中可用的物理内存区域。这要求内核能够区分:可读写的随机访问内存(RAM)、未映射的地址空间,以及内存映射 I/O (MMIO) 区域。
 
 ---
 
-### **技术原理**
+#### **技术原理**
 
 采用**试探性读写验证**机制。从已知的安全内存地址(通常为内核加载区域)开始,通过系统性的探测操作来识别可用内存:
 
@@ -824,7 +224,7 @@ return merge_contiguous_regions(available_addresses)
 
 ---
 
-### **风险分析与缓解策略**
+#### **风险分析与缓解策略**
 
 **主要风险**:
 
@@ -847,5 +247,7 @@ return merge_contiguous_regions(available_addresses)
 
 
 ## **四、 总结**
+
+本次实验围绕“页级 + 对象级”两条主线构建了完整的内核内存管理链路：先通过 First-Fit/Best-Fit 掌握基础页分配，再分别扩展了 Buddy 与 SLUB 系统以覆盖大块与小对象需求；Challenge3 则探索了固件缺失时的内存探测策略。所有功能均在 `make qemu` 自检中通过，关键实现与测试细节已拆分到 `design_buddy.md`、`design_slub.md` 等文档，便于后续维护与复用。
 
 

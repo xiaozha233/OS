@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <assert.h>
+#include <buddy_pmm.h>  // 添加这一行
 
 /* Slub 分配器实现
  * 
@@ -24,6 +25,7 @@
 #define MAX_CACHES 32
 static kmem_cache_t cache_pool[MAX_CACHES];
 static int cache_count = 0;
+static bool caches_ready = 0;
 
 
 // 全局 cache 链表 (管理所有创建的 kmem_cache)
@@ -34,6 +36,10 @@ static list_entry_t cache_list;
 static kmem_cache_t *size_caches[NUM_SIZE_CACHES];
 static size_t size_cache_sizes[NUM_SIZE_CACHES] = {
     16, 32, 64, 128, 256, 512, 1024, 2048
+};
+static const char *size_cache_names[NUM_SIZE_CACHES] = {
+    "slub-16", "slub-32", "slub-64", "slub-128",
+    "slub-256", "slub-512", "slub-1024", "slub-2048"
 };
 
 // ========== 辅助函数 ==========
@@ -51,11 +57,14 @@ static size_t calculate_objects_per_slab(size_t obj_size) {
 
 // 从对象地址获取其所属的 slab
 static slab_t* obj_to_slab(void *obj) {
-    // 找到对象所在的 Page
-    struct Page *page = pa2page(PADDR(obj));
-    
-    // Page 结构的 property 字段存储指向 slab_t 的指针
-    return (slab_t*)(uintptr_t)page->property;
+    if (obj == NULL) {
+        return NULL;
+    }
+
+    uintptr_t slab_addr = ROUNDDOWN((uintptr_t)obj, PGSIZE);
+    slab_t *slab = (slab_t *)slab_addr;
+
+    return slab;
 }
 
 // ========== Slab 管理函数 ==========
@@ -67,12 +76,16 @@ static slab_t* slab_create(kmem_cache_t *cache) {
     if (!page) {
         return NULL;
     }
-    // 2. 获取page的虚拟地址
-    void *page_addr = KADDR(page2pa(page));
+    // 2. 获取这个 Page 对应的虚拟地址
+    // 提示：Page 是物理页描述符，需要转换成内核虚拟地址
+    //       使用 page2kva(page)
+    void *page_addr = page2kva(page);
     // 3. 在page开头放置slab_t结构
     slab_t *slab = (slab_t *)page_addr;
     // 4. 初始化slab结构
     slab->page = page;
+    page->property = 0;
+    slab->cache = cache;
     slab->inuse = 0;
     slab->objects = cache->num_objs_per_slab;
     slab->free_list = NULL;
@@ -90,10 +103,7 @@ static slab_t* slab_create(kmem_cache_t *cache) {
     }
     // 7. 设置slab的free_list指针指向第一个object
     slab->free_list = first_obj;
-    // 8. 将slab的地址存储在page的property字段中
-    page->property = (uintptr_t)slab;
-    // 9. 返回新创建的slab
-
+    // 8. 返回新创建的slab
     return slab;
 }
 
@@ -135,6 +145,9 @@ kmem_cache_t* kmem_cache_create(const char *name, size_t size, size_t align) {
     if (size < SLUB_MIN_SIZE || size > SLUB_MAX_SIZE) {
         cprintf("Invalid kmem_cache size: %zu\n", size);
         return NULL;
+    }
+    if (align == 0) {
+        align = 1;
     }
     // 2. 检查是否还有可用的cache槽位
     if (cache_count >= MAX_CACHES) {
@@ -243,51 +256,192 @@ void kmem_cache_destroy(kmem_cache_t *cache) {
     // 2. 遍历空闲slab链表，销毁所有slab
     while (!list_empty(&cache->slabs_empty)) {
         list_entry_t *le = list_next(&cache->slabs_empty);
+        slab_t *slab = le2slab(le, slab_link);
+        list_del(&slab->slab_link);
+        slab_destroy(cache, slab);
+    }
+    // 3. 从全局cache链表中移除该cache
+    list_del(&cache->cache_link);
+    cprintf("Destroyed cache '%s'\n", cache->name);
 }
 
 // ========== 通用分配接口 ==========
 
+    static kmem_cache_t* find_cache(size_t size) {
+        if (!caches_ready) {
+            cprintf("find_cache: caches not initialized\n");
+            return NULL;
+        }
+
+        for (int i = 0; i < NUM_SIZE_CACHES; i++) {
+            if (size <= size_cache_sizes[i]) {
+                return size_caches[i];
+            }
+        }
+
+        cprintf("find_cache: requested size %d exceeds maximum managed size %d\n",
+                (int)size, (int)size_cache_sizes[NUM_SIZE_CACHES - 1]);
+        return NULL;
+    }
+
 void* kmalloc(size_t size) {
-    // TODO: 第七步实现
-    return NULL;
+    cprintf("kmalloc: called with size=%d\n", (int)size);
+    
+    if (size == 0) {
+        cprintf("kmalloc: size is 0, returning NULL\n");
+        return NULL;
+    }
+    
+    // 找到合适的缓存
+    cprintf("kmalloc: finding suitable cache\n");
+    struct kmem_cache *cache = find_cache(size);
+    if (!cache) {
+        cprintf("kmalloc: no suitable cache found\n");
+        return NULL;
+    }
+    
+    cprintf("kmalloc: found cache '%s', obj_size=%d\n", 
+            cache->name, (int)cache->size);
+    
+    // 从缓存分配对象
+    void *obj = kmem_cache_alloc(cache);
+    cprintf("kmalloc: allocated object at %p\n", obj);
+    
+    return obj;
 }
 
+
 void kfree(void *obj) {
-    // TODO: 第七步实现
+    // 1. 检查参数是否合法
+    if (!obj) {
+        cprintf("kfree: NULL pointer\n");
+        return;
+    }
+    // 2. 找到所属的slab
+    slab_t *slab = obj_to_slab(obj);
+    if (!slab) {
+        cprintf("kfree: object does not belong to any slab\n");
+        return;
+    }
+    // 3. 找到所属的cache
+    kmem_cache_t *cache = slab->cache;
+    if (!cache) {
+        cprintf("kfree: slab does not belong to any cache\n");
+        return;
+    }
+    // 4. 调用cache的释放函数
+    kmem_cache_free(cache, obj);
 }
 
 // ========== Slub PMM 初始化 ==========
 
 static void slub_init(void) {
     cprintf("Slub allocator initializing...\n");
+
+    memset(cache_pool, 0, sizeof(cache_pool));
+    memset(size_caches, 0, sizeof(size_caches));
     list_init(&cache_list);
+    cache_count = 0;
+
+    // 首先初始化底层的 Buddy System
+    cprintf("Slub: initializing underlying buddy system\n");
+    extern void buddy_init(void);
+    buddy_init();
+    cprintf("Slub: buddy system initialized\n");
+
+    cprintf("Slub: initializing size caches\n");
+    for (int i = 0; i < NUM_SIZE_CACHES; i++) {
+        kmem_cache_t *cache = kmem_cache_create(size_cache_names[i], size_cache_sizes[i], 1);
+        if (cache == NULL) {
+            panic("Slub: failed to create cache for size %d", (int)size_cache_sizes[i]);
+        }
+        size_caches[i] = cache;
+    }
+
+    caches_ready = 1;
+
+    cprintf("Slub: all caches initialized\n");
 }
 
 static void slub_init_memmap(struct Page *base, size_t n) {
-    // Slub 不直接管理物理页，委托给底层的 Buddy System
-    cprintf("Slub: delegating %d pages to buddy system\n", n);
+    // Slub 不直接管理物理页,委托给底层的 Buddy System
+    cprintf("Slub: delegating %d pages to buddy system\n", (int)n);
+    cprintf("Slub: calling buddy_init_memmap with base=%p, n=%d\n", base, (int)n);
+    
+    // 初始化底层的 Buddy System
+    buddy_init_memmap(base, n);
+    
+    cprintf("Slub: buddy_init_memmap completed\n");
 }
 
 static struct Page* slub_alloc_pages(size_t n) {
-    // 不应该调用此函数，因为 Slub 是上层分配器
-    panic("slub_alloc_pages should not be called directly!");
-    return NULL;
+    cprintf("Warning: slub_alloc_pages called with n=%d\n", n);
+    return buddy_alloc_pages(n);  // 移除 extern 声明
 }
 
 static void slub_free_pages(struct Page *base, size_t n) {
-    // 不应该调用此函数
-    panic("slub_free_pages should not be called directly!");
+    cprintf("Warning: slub_free_pages called\n");
+    buddy_free_pages(base, n);  // 移除 extern 声明
 }
 
 static size_t slub_nr_free_pages(void) {
-    // 返回底层 Buddy System 的空闲页数
-    extern size_t buddy_nr_free_pages(void);
-    return buddy_nr_free_pages();
+    return buddy_nr_free_pages();  // 移除 extern 声明
 }
 
 static void slub_check(void) {
     cprintf("\n=== Slub Allocator Comprehensive Test ===\n");
-    // TODO: 第八步实现测试
+    
+    cprintf("slub_check: starting test 1 - basic allocation\n");
+    
+    // 测试1: 基本分配和释放
+    cprintf("Test 1: Basic allocation and free\n");
+    
+    cprintf("slub_check: allocating 32 bytes\n");
+    void *p1 = kmalloc(32);
+    cprintf("slub_check: p1 = %p\n", p1);
+    assert(p1 != NULL);
+    
+    cprintf("slub_check: allocating 64 bytes\n");
+    void *p2 = kmalloc(64);
+    cprintf("slub_check: p2 = %p\n", p2);
+    assert(p2 != NULL);
+    
+    cprintf("slub_check: allocating 128 bytes\n");
+    void *p3 = kmalloc(128);
+    cprintf("slub_check: p3 = %p\n", p3);
+    assert(p3 != NULL);
+    
+    cprintf("slub_check: freeing p1\n");
+    kfree(p1);
+    
+    cprintf("slub_check: freeing p2\n");
+    kfree(p2);
+    
+    cprintf("slub_check: freeing p3\n");
+    kfree(p3);
+    
+    cprintf("Test 1 passed!\n");
+    
+    // 测试2: 多次分配
+    cprintf("\nTest 2: Multiple allocations\n");
+    cprintf("slub_check: starting test 2\n");
+    
+    void *ptrs[10];
+    for (int i = 0; i < 10; i++) {
+        cprintf("slub_check: allocating ptr[%d], size=64\n", i);
+        ptrs[i] = kmalloc(64);
+        cprintf("slub_check: ptr[%d] = %p\n", i, ptrs[i]);
+        assert(ptrs[i] != NULL);
+    }
+    
+    for (int i = 0; i < 10; i++) {
+        cprintf("slub_check: freeing ptr[%d]\n", i);
+        kfree(ptrs[i]);
+    }
+    
+    cprintf("Test 2 passed!\n");
+    
+    cprintf("\n=== All Slub tests passed! ===\n");
 }
 
 // Slub PMM Manager

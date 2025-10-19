@@ -11,15 +11,6 @@
 #define SLUB_MIN_SIZE 16
 #define SLUB_MAX_SIZE 2048
 
-// Slab 状态
-typedef struct slab {
-    list_entry_t slab_link;      // 用于链接到 kmem_cache 的三个链表之一
-    void *free_list;             // 指向 slab 内第一个空闲对象
-    uint32_t inuse;              // 已分配的对象数量
-    uint32_t objects;            // 该 slab 中对象的总数
-    struct Page *page;           // 该 slab 占用的物理页
-} slab_t;
-
 // 对象缓存 (kmem_cache)
 typedef struct kmem_cache {
     const char *name;            // 缓存名称，如 "task_struct"
@@ -35,6 +26,18 @@ typedef struct kmem_cache {
     
     list_entry_t cache_link;     // 用于链接到全局 cache 链表
 } kmem_cache_t;
+
+// Slab 状态
+typedef struct slab {
+    list_entry_t slab_link;      // 用于链接到 kmem_cache 的三个链表之一
+    void *free_list;             // 指向 slab 内第一个空闲对象
+    uint32_t inuse;              // 已分配的对象数量
+    uint32_t objects;            // 该 slab 中对象的总数
+    struct Page *page;           // 该 slab 占用的物理页
+    kmem_cache_t *cache;         // 指向所属的 kmem_cache
+} slab_t;
+
+
 
 // Slub PMM 管理器接口
 extern const struct pmm_manager slub_pmm_manager;

@@ -86,7 +86,12 @@ static inline uintptr_t page2pa(struct Page *page) {
     return page2ppn(page) << PGSHIFT;
 }
 
-
+/* Convert a Page* (physical page descriptor) to kernel virtual address.
+ * Uses page2pa(page) + va_pa_offset to compute kernel VA.
+ */
+static inline void *page2kva(struct Page *page) {
+    return (void *)((uintptr_t)page2pa(page) + (uintptr_t)va_pa_offset);
+}
 
 static inline int page_ref(struct Page *page) { return page->ref; }
 
