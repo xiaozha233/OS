@@ -5,7 +5,7 @@
     csrw sscratch, sp
 
     addi sp, sp, -36 * REGBYTES
-    # save x registers
+    # 保存 x 寄存器
     STORE x0, 0*REGBYTES(sp)
     STORE x1, 1*REGBYTES(sp)
     STORE x3, 3*REGBYTES(sp)
@@ -38,9 +38,9 @@
     STORE x30, 30*REGBYTES(sp)
     STORE x31, 31*REGBYTES(sp)
 
-    # get sr, epc, badvaddr, cause
-    # Set sscratch register to 0, so that if a recursive exception
-    # occurs, the exception vector knows it came from the kernel
+    # 获取 sr, epc, badvaddr, cause
+    # 将 sscratch 寄存器设置为 0，这样如果发生递归异常
+    # 异常向量就知道它来自内核
     csrrw s0, sscratch, x0
     csrr s1, sstatus
     csrr s2, sepc
@@ -62,7 +62,7 @@
     csrw sstatus, s1
     csrw sepc, s2
 
-    # restore x registers
+    # 恢复 x 寄存器
     LOAD x1, 1*REGBYTES(sp)
     LOAD x3, 3*REGBYTES(sp)
     LOAD x4, 4*REGBYTES(sp)
@@ -93,7 +93,7 @@
     LOAD x29, 29*REGBYTES(sp)
     LOAD x30, 30*REGBYTES(sp)
     LOAD x31, 31*REGBYTES(sp)
-    # restore sp last
+    # 最后恢复 sp
     LOAD x2, 2*REGBYTES(sp)
     .endm
 
@@ -104,10 +104,10 @@ __alltraps:
 
     move  a0, sp
     jal trap
-    # sp should be the same as before "jal trap"
+    # sp 应该和 "jal trap" 之前一样
 
     .globl __trapret
 __trapret:
     RESTORE_ALL
-    # return from supervisor call
+    # 从监管者调用返回
     sret

@@ -19,39 +19,31 @@ static void print_ticks() {
 #endif
 }
 
-/* idt_init - initialize IDT to each of the entry points in kern/trap/vectors.S
+/* idt_init - 初始化IDT，使其指向 kern/trap/vectors.S 中的各个入口点
  */
 void idt_init(void) {
-    /* LAB3 YOUR CODE : STEP 2 */
-    /* (1) Where are the entry addrs of each Interrupt Service Routine (ISR)?
-     *     All ISR's entry addrs are stored in __vectors. where is uintptr_t
-     * __vectors[] ?
-     *     __vectors[] is in kern/trap/vector.S which is produced by
-     * tools/vector.c
-     *     (try "make" command in lab3, then you will find vector.S in kern/trap
-     * DIR)
-     *     You can use  "extern uintptr_t __vectors[];" to define this extern
-     * variable which will be used later.
-     * (2) Now you should setup the entries of ISR in Interrupt Description
-     * Table (IDT).
-     *     Can you see idt[256] in this file? Yes, it's IDT! you can use SETGATE
-     * macro to setup each item of IDT
-     * (3) After setup the contents of IDT, you will let CPU know where is the
-     * IDT by using 'lidt' instruction.
-     *     You don't know the meaning of this instruction? just google it! and
-     * check the libs/x86.h to know more.
-     *     Notice: the argument of lidt is idt_pd. try to find it!
+    /* 实验三 你的代码：步骤二 */
+    /* (1) 每个中断服务例程（ISR）的入口地址在哪里？
+     *     所有ISR的入口地址都存储在 __vectors 中。uintptr_t __vectors[] 在哪里？
+     *     __vectors[] 位于 kern/trap/vector.S 中，由 tools/vector.c 生成
+     *     （在 lab3 中尝试 "make" 命令，你会在 kern/trap 目录下找到 vector.S）
+     *     你可以使用 "extern uintptr_t __vectors[];" 来定义这个外部变量，稍后会用到。
+     * (2) 现在你应该在中断描述符表（IDT）中设置ISR的条目。
+     *     你能在这个文件中看到 idt[256] 吗？是的，它就是IDT！你可以使用 SETGATE 宏来设置IDT的每个项目。
+     * (3) 设置好IDT的内容后，你需要使用 'lidt' 指令让CPU知道IDT的位置。
+     *     你不知道这个指令的含义吗？Google一下！并查看 libs/x86.h 以了解更多信息。
+     *     注意：lidt 的参数是 idt_pd。试着找到它！
      */
 
     extern void __alltraps(void);
-    /* Set sup0 scratch register to 0, indicating to exception vector
-       that we are presently executing in the kernel */
+    /* 将 sup0 scratch 寄存器设置为 0，向异常向量表明
+       我们当前正在内核中执行 */
     write_csr(sscratch, 0);
-    /* Set the exception vector address */
+    /* 设置异常向量地址 */
     write_csr(stvec, &__alltraps);
 }
 
-/* trap_in_kernel - test if trap happened in kernel */
+/* trap_in_kernel - 测试陷阱是否发生在内核中 */
 bool trap_in_kernel(struct trapframe *tf) {
     return (tf->status & SSTATUS_SPP) != 0;
 }
@@ -119,12 +111,11 @@ void interrupt_handler(struct trapframe *tf) {
             cprintf("User Timer interrupt\n");
             break;
         case IRQ_S_TIMER:
-            // "All bits besides SSIP and USIP in the sip register are
-            // read-only." -- privileged spec1.9.1, 4.1.4, p59
-            // In fact, Call sbi_set_timer will clear STIP, or you can clear it
-            // directly.
+            // "sip 寄存器中除了 SSIP 和 USIP 之外的所有位都是只读的。"
+            // -- privileged spec1.9.1, 4.1.4, p59
+            // 事实上，调用 sbi_set_timer 会清除 STIP，或者你可以直接清除它。
             // cprintf("Supervisor timer interrupt\n");
-             /* LAB3 EXERCISE1   YOUR CODE :  */
+             /* 实验三 练习一   你的代码： */
             /*(1)设置下次时钟中断- clock_set_next_event()
              *(2)计数器（ticks）加一
              *(3)当计数器加到100的时候，我们会输出一个`100ticks`表示我们触发了100次时钟中断，同时打印次数（num）加一
@@ -163,7 +154,7 @@ void exception_handler(struct trapframe *tf) {
             break;
         case CAUSE_ILLEGAL_INSTRUCTION:
              // 非法指令异常处理
-             /* LAB3 CHALLENGE3   YOUR CODE :  */
+             /* 实验三 挑战三   你的代码： */
             /*(1)输出指令异常类型（ Illegal instruction）
              *(2)输出异常指令地址
              *(3)更新 tf->epc寄存器
@@ -171,7 +162,7 @@ void exception_handler(struct trapframe *tf) {
             break;
         case CAUSE_BREAKPOINT:
             //断点异常处理
-            /* LAB3 CHALLLENGE3   YOUR CODE :  */
+            /* 实验三 挑战三   你的代码： */
             /*(1)输出指令异常类型（ breakpoint）
              *(2)输出异常指令地址
              *(3)更新 tf->epc寄存器
@@ -201,21 +192,20 @@ void exception_handler(struct trapframe *tf) {
 
 static inline void trap_dispatch(struct trapframe *tf) {
     if ((intptr_t)tf->cause < 0) {
-        // interrupts
+        // 中断
         interrupt_handler(tf);
     } else {
-        // exceptions
+        // 异常
         exception_handler(tf);
     }
 }
 
 /* *
- * trap - handles or dispatches an exception/interrupt. if and when trap()
- * returns,
- * the code in kern/trap/trapentry.S restores the old CPU state saved in the
- * trapframe and then uses the iret instruction to return from the exception.
+ * trap - 处理或分发一个异常/中断。如果/当 trap() 返回时，
+ * kern/trap/trapentry.S 中的代码会恢复保存在 trapframe 中的旧 CPU 状态，
+ * 然后使用 iret 指令从异常中返回。
  * */
 void trap(struct trapframe *tf) {
-    // dispatch based on what type of trap occurred
+    // 根据发生的陷阱类型进行分发
     trap_dispatch(tf);
 }
