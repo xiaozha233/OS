@@ -116,7 +116,7 @@ void interrupt_handler(struct trapframe *tf) {
             // -- privileged spec1.9.1, 4.1.4, p59
             // 事实上，调用 sbi_set_timer 会清除 STIP，或者你可以直接清除它。
             // cprintf("Supervisor timer interrupt\n");
-             /* 实验三 练习一   你的代码： */
+             /* 实验三 练习一   你的代码：2314035 */
             /*(1)设置下次时钟中断- clock_set_next_event()
              *(2)计数器（ticks）加一
              *(3)当计数器加到100的时候，我们会输出一个`100ticks`表示我们触发了100次时钟中断，同时打印次数（num）加一
@@ -168,7 +168,7 @@ void exception_handler(struct trapframe *tf) {
             break;
         case CAUSE_ILLEGAL_INSTRUCTION:
              // 非法指令异常处理
-             /* 实验三 挑战三   你的code： */
+             /* 实验三 挑战三   你的code：2314076 */
             /*(1)输出指令异常类型（ Illegal instruction）
              *(2)输出异常指令地址
              *(3)更新 tf->epc寄存器
@@ -181,7 +181,7 @@ void exception_handler(struct trapframe *tf) {
             break;
         case CAUSE_BREAKPOINT:
             //断点异常处理
-            /* 实验三 挑战三   你的code： */
+            /* 实验三 挑战三   你的code：2313255 */
             /*(1)输出指令异常类型（ breakpoint）
              *(2)输出异常指令地址
              *(3)更新 tf->epc寄存器
