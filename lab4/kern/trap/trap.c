@@ -9,7 +9,7 @@
 #include <stdio.h>
 #include <trap.h>
 #include <vmm.h>
-
+#include <sbi.h>
 #define TICK_NUM 100
 
 static void print_ticks()
@@ -21,17 +21,15 @@ static void print_ticks()
 #endif
 }
 
-/* idt_init - initialize IDT to each of the entry points in kern/trap/vectors.S
- */
+/* idt_init - 初始化 IDT，使其指向 kern/trap/vectors.S 中的各个入口点 */
 void idt_init(void)
 {
     extern void __alltraps(void);
-    /* Set sscratch register to 0, indicating to exception vector that we are
-     * presently executing in the kernel */
+    /* 将 sscratch 寄存器设置为 0，表示异常向量当前在内核态执行 */
     write_csr(sscratch, 0);
-    /* Set the exception vector address */
+    /* 设置异常向量地址 */
     write_csr(stvec, &__alltraps);
-    /* Allow kernel to access user memory */
+    /* 允许内核访问用户内存 */
     set_csr(sstatus, SSTATUS_SUM);
 }
 
@@ -104,16 +102,28 @@ void interrupt_handler(struct trapframe *tf)
         cprintf("User software interrupt\n");
         break;
     case IRQ_S_TIMER:
-        // "All bits besides SSIP and USIP in the sip register are
-        // read-only." -- privileged spec1.9.1, 4.1.4, p59
-        // In fact, Call sbi_set_timer will clear STIP, or you can clear it
-        // directly.
-        // clear_csr(sip, SIP_STIP);
-
-        /*LAB3 请补充你在lab3中的代码 */ 
-        clock_set_next_event();
-        if (++ticks % TICK_NUM == 0) {
-            print_ticks();
+        // "sip 寄存器中除了 SSIP 和 USIP 之外的所有位都是只读的。"
+        // -- privileged spec1.9.1, 4.1.4, p59
+        // 事实上，调用 sbi_set_timer 会清除 STIP，或者你可以直接清除它。
+        // cprintf("Supervisor timer interrupt\n");
+        /* 实验三 练习一   你的代码：2314035 */
+        /*(1)设置下次时钟中断- clock_set_next_event()
+         *(2)计数器（ticks）加一
+         *(3)当计数器加到100的时候，我们会输出一个`100ticks`表示我们触发了100次时钟中断，同时打印次数（num）加一
+         * (4)判断打印次数，当打印次数为10时，调用<sbi.h>中的关机函数关机
+         */
+        {
+            extern volatile size_t ticks;
+            clock_set_next_event(); // 设置下次时钟中断
+            ticks++; // 计数器加一
+            if (ticks % TICK_NUM == 0) { // 每100次时钟中断
+                print_ticks(); // 打印 "100 ticks"
+                static int num = 0; // 打印次数计数器
+                num++;
+                if (num == 10) { // 打印10次后关机
+                    sbi_shutdown();
+                }
+            }
         }
         break;
     case IRQ_H_TIMER:
@@ -198,22 +208,21 @@ void exception_handler(struct trapframe *tf)
 }
 
 /* *
- * trap - handles or dispatches an exception/interrupt. if and when trap()
- * returns,
- * the code in kern/trap/trapentry.S restores the old CPU state saved in the
- * trapframe and then uses the iret instruction to return from the exception.
+ * trap - 处理或分发异常/中断。当 trap() 返回时，
+ * kern/trap/trapentry.S 中的代码会恢复保存在 trapframe 中的旧 CPU 状态，
+ * 然后使用 iret 指令从异常返回。
  * */
 void trap(struct trapframe *tf)
 {
-    // dispatch based on what type of trap occurred
+    // 根据发生的 trap 类型进行分发
     if ((intptr_t)tf->cause < 0)
     {
-        // interrupts
+        // 中断
         interrupt_handler(tf);
     }
     else
     {
-        // exceptions
+        // 异常
         exception_handler(tf);
     }
 }
