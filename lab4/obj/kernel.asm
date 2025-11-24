@@ -6292,7 +6292,7 @@ ffffffffc0203284:	f022                	sd	s0,32(sp)
 ffffffffc0203286:	e84a                	sd	s2,16(sp)
 ffffffffc0203288:	842a                	mv	s0,a0
         // 打印当前进程(initproc)的 pid 和名称
-        cprintf("这是 initproc, pid = %d, name = \"%s\"\n", current->pid, get_proc_name(current));
+        cprintf("this initproc, pid = %d, name = \"%s\"\n", current->pid, get_proc_name(current));
 ffffffffc020328a:	0000a917          	auipc	s2,0xa
 ffffffffc020328e:	24693903          	ld	s2,582(s2) # ffffffffc020d4d0 <current>
         memset(name, 0, sizeof(name));
@@ -6302,7 +6302,7 @@ ffffffffc0203296:	8526                	mv	a0,s1
 {
 ffffffffc0203298:	f406                	sd	ra,40(sp)
 ffffffffc020329a:	e44e                	sd	s3,8(sp)
-        cprintf("这是 initproc, pid = %d, name = \"%s\"\n", current->pid, get_proc_name(current));
+        cprintf("this initproc, pid = %d, name = \"%s\"\n", current->pid, get_proc_name(current));
 ffffffffc020329c:	00492983          	lw	s3,4(s2)
         memset(name, 0, sizeof(name));
 ffffffffc02032a0:	3e5000ef          	jal	ra,ffffffffc0203e84 <memset>
@@ -6312,7 +6312,7 @@ ffffffffc02032a8:	463d                	li	a2,15
 ffffffffc02032aa:	8526                	mv	a0,s1
 ffffffffc02032ac:	3eb000ef          	jal	ra,ffffffffc0203e96 <memcpy>
 ffffffffc02032b0:	862a                	mv	a2,a0
-        cprintf("这是 initproc, pid = %d, name = \"%s\"\n", current->pid, get_proc_name(current));
+        cprintf("this initproc, pid = %d, name = \"%s\"\n", current->pid, get_proc_name(current));
 ffffffffc02032b2:	85ce                	mv	a1,s3
 ffffffffc02032b4:	00002517          	auipc	a0,0x2
 ffffffffc02032b8:	37450513          	addi	a0,a0,884 # ffffffffc0205628 <default_pmm_manager+0x920>
@@ -6846,7 +6846,7 @@ ffffffffc02036d8:	0000a717          	auipc	a4,0xa
 ffffffffc02036dc:	dc873703          	ld	a4,-568(a4) # ffffffffc020d4a0 <boot_pgdir_pa>
 ffffffffc02036e0:	77d4                	ld	a3,168(a5)
 ffffffffc02036e2:	0ee68463          	beq	a3,a4,ffffffffc02037ca <proc_init+0x186>
-                cprintf("alloc_proc() 正确!\n");
+                cprintf("alloc_proc() correct!\n");
         }
 
         // 手动设置 idleproc 的各个字段,因为它是特殊的第 0 号进程
@@ -7003,7 +7003,7 @@ ffffffffc02037fc:	0b07a703          	lw	a4,176(a5)
 ffffffffc0203800:	8d59                	or	a0,a0,a4
 ffffffffc0203802:	0005071b          	sext.w	a4,a0
 ffffffffc0203806:	ee0710e3          	bnez	a4,ffffffffc02036e6 <proc_init+0xa2>
-                cprintf("alloc_proc() 正确!\n");
+                cprintf("alloc_proc() correct!\n");
 ffffffffc020380a:	00002517          	auipc	a0,0x2
 ffffffffc020380e:	ede50513          	addi	a0,a0,-290 # ffffffffc02056e8 <default_pmm_manager+0x9e0>
 ffffffffc0203812:	983fc0ef          	jal	ra,ffffffffc0200194 <cprintf>

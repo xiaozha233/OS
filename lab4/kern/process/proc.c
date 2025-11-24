@@ -502,7 +502,7 @@ static int
 init_main(void *arg)
 {
         // 打印当前进程(initproc)的 pid 和名称
-        cprintf("这是 initproc, pid = %d, name = \"%s\"\n", current->pid, get_proc_name(current));
+        cprintf("this initproc, pid = %d, name = \"%s\"\n", current->pid, get_proc_name(current));
         // 打印传入的参数字符串
         cprintf("To U: \"%s\".\n", (const char *)arg);
         // 打印结束信息
@@ -563,7 +563,7 @@ void proc_init(void)
         // - name 应全为 0(尚未设置名称)
         if (idleproc->pgdir == boot_pgdir_pa && idleproc->tf == NULL && !context_init_flag && idleproc->state == PROC_UNINIT && idleproc->pid == -1 && idleproc->runs == 0 && idleproc->kstack == 0 && idleproc->need_resched == 0 && idleproc->parent == NULL && idleproc->mm == NULL && idleproc->flags == 0 && !proc_name_flag)
         {
-                cprintf("alloc_proc() 正确!\n");
+                cprintf("alloc_proc() correct!\n");
         }
 
         // 手动设置 idleproc 的各个字段,因为它是特殊的第 0 号进程
