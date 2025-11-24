@@ -1,7 +1,15 @@
-.text
-.globl kernel_thread_entry
-kernel_thread_entry:        # void kernel_thread(void)
-	move a0, s1
-	jalr s0
+.text                       # 切换到代码段（text section），后续为可执行代码
+.globl kernel_thread_entry  # 将 kernel_thread_entry 符号导出为全局可见，链接器和其他文件可引用
 
-	jal do_exit
+kernel_thread_entry:        # kernel 线程入口：由线程创建时设置好寄存器后跳转到这里执行
+							# 约定：s0 保存要执行的线程函数的入口地址（函数指针），
+							#       s1 保存要传递给线程函数的第一个参数
+	move a0, s1              # 将 s1 的值移动到 a0（RISC-V 的第一个函数参数寄存器）
+							# 目的：把预先保存在 s1 的线程函数参数传给即将调用的线程函数
+
+	jalr s0                 # 通过 s0 跳转并链接（等价于 jalr ra, s0, 0）：调用线程函数
+							# 作用：跳转到 s0 中的函数指针，ra 保存返回地址（下一条指令地址）
+							# 返回时会回到本函数的下一条指令（即下面的 jal do_exit）
+
+	jal do_exit             # 如果线程函数返回，跳转到 do_exit 来执行线程退出流程（并不会返回）
+							# 这里使用 jal 保存返回地址虽无实际再返回，但保持调用约定和可调试性

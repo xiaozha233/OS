@@ -14,7 +14,7 @@ enum proc_state
     PROC_RUNNABLE,   // 可运行（可能正在运行）
     PROC_ZOMBIE,     // 即将死亡，等待父进程回收资源
 };
-
+// 进程上下文结构体定义，用于保存进程切换时的寄存器状态
 struct context
 {
     uintptr_t ra;
@@ -33,11 +33,11 @@ struct context
     uintptr_t s11;
 };
 
-#define PROC_NAME_LEN 15
-#define MAX_PROCESS 4096
-#define MAX_PID (MAX_PROCESS * 2)
+#define PROC_NAME_LEN 15 // 进程名最大长度
+#define MAX_PROCESS 4096 // 最大进程数
+#define MAX_PID (MAX_PROCESS * 2)  // 最大PID值，为进程数的两倍（避免进程ID立即被重用）
 
-extern list_entry_t proc_list;
+extern list_entry_t proc_list;               // 进程链表
 
 struct proc_struct
 {
@@ -54,12 +54,12 @@ struct proc_struct
     uint32_t flags;               // 进程标志
     char name[PROC_NAME_LEN + 1]; // 进程名
     list_entry_t list_link;       // 进程链表
-    list_entry_t hash_link;       // 进程哈希链表
+    list_entry_t hash_link;       // 进程哈希链表，用于快速查找指定PID的进程
 };
 
 #define le2proc(le, member) \
     to_struct((le), struct proc_struct, member)
-
+// 三个全局变量，分别表示空闲进程、初始化进程和当前运行的进程
 extern struct proc_struct *idleproc, *initproc, *current;
 
 void proc_init(void); // 初始化进程

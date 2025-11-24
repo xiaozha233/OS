@@ -312,28 +312,41 @@ void page_remove(pde_t *pgdir, uintptr_t la)
 //  perm:  权限
 // 返回值：总是0
 // 注意：页表改变后需要刷新TLB
+// 在 pgdir（顶级页表）中为 page 建立 la 的映射，并设置权限 perm。
+// 如果对应页表项不存在且 create=1，则会分配页表页；成功返回 0，内存不足返回 -E_NO_MEM。
 int page_insert(pde_t *pgdir, struct Page *page, uintptr_t la, uint32_t perm)
 {
+    // 获取 la 对应的 pte 指针；如果对应的页表不存在则创建新的页表页（get_pte 的第三个参数为 1 表示需要创建）
     pte_t *ptep = get_pte(pgdir, la, 1);
+    // 如果无法获取或创建页表项（例如内存耗尽），返回错误
     if (ptep == NULL)
     {
         return -E_NO_MEM;
     }
-    page_ref_inc(page); // 增加引用计数
+    // 将将要插入的 page 的引用计数加一，表示此页将引用（或被某页表项引用）一次
+    page_ref_inc(page);
+    // 如果目标页表项当前是有效的（已经有映射）
     if (*ptep & PTE_V)
     {
+        // 把当前页表项指向的物理页转换回 Page 结构体
         struct Page *p = pte2page(*ptep);
+        // 如果当前映射已经是我们要插入的同一页（即重复插入同一页）
         if (p == page)
         {
+            // 由于先前对 page 做了 page_ref_inc，这里要抵消之前的增加，保持引用计数不变
             page_ref_dec(page);
         }
         else
         {
+            // 如果当前映射指向不同的页，则移除原有映射并处理引用计数与可能的释放
             page_remove_pte(pgdir, la, ptep);
         }
     }
+    // 将页表项设置为指向要插入页的物理页号，并标记为有效（PTE_V）及传入的权限位
     *ptep = pte_create(page2ppn(page), PTE_V | perm);
+    // 页表发生改变后需要刷新对应虚拟地址的 TLB 条目，避免过期映射被使用
     tlb_invalidate(pgdir, la);
+    // 成功返回 0
     return 0;
 }
 

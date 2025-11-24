@@ -3,10 +3,13 @@
     .macro SAVE_ALL
     .align 2
 
+    # 把当前的 sp 写入 sscratch CSR（保存“原始”sp）
     csrw sscratch, sp
 
+    # 为 trapframe 在内核栈上分配空间：36 * REGBYTES（保存寄存器 / 状态）
     addi sp, sp, -36 * REGBYTES
-    # save gprs
+
+    # 保存通用寄存器（x0 固定为 0，不保存）
     STORE  x1,1*REGBYTES(sp)
     STORE  x3,3*REGBYTES(sp)
     STORE  x4,4*REGBYTES(sp)
@@ -38,7 +41,11 @@
     STORE  x30,30*REGBYTES(sp)
     STORE  x31,31*REGBYTES(sp)
 
-    # get sr, epc, badvaddr, cause
+    # 把重要的 CSR/状态寄存器读出后也保存到 trapframe：
+    # s0 用来保存“原始”sp（刚才写入 sscratch 的值）
+    # s1 保存 sstatus（状态寄存器），s2 保存 sepc（异常返回地址）
+    # s3 读自 CSR 0x143（supervisor trap value / stval，坏地址信息）
+    # s4 保存 scause（异常原因）
     csrr s0, sscratch
     csrr s1, sstatus
     csrr s2, sepc
@@ -54,13 +61,14 @@
 
     .macro RESTORE_ALL
 
+    # 先从 trapframe 恢复 sstatus 和 sepc（保证返回时 CSR 恢复到进程上下文）
     LOAD s1, 32*REGBYTES(sp)
     LOAD s2, 33*REGBYTES(sp)
 
     csrw sstatus, s1
     csrw sepc, s2
 
-    // restore x registers
+    # 恢复通用寄存器（x0 不用恢复）
     LOAD  x1,1*REGBYTES(sp)
     LOAD  x3,3*REGBYTES(sp)
     LOAD  x4,4*REGBYTES(sp)
@@ -91,7 +99,7 @@
     LOAD  x29,29*REGBYTES(sp)
     LOAD  x30,30*REGBYTES(sp)
     LOAD  x31,31*REGBYTES(sp)
-    # restore sp last
+    # 最后恢复 x2（sp），因为恢复 sp 之后栈帧会被放弃
     LOAD  x2,2*REGBYTES(sp)
     .endm
 
@@ -99,18 +107,20 @@
 __alltraps:
     SAVE_ALL
 
+    # 将当前 trapframe 的地址（sp）传递给 C 汇编的 trap 处理函数
     move  a0, sp
     jal trap
-    # sp should be the same as before "jal trap"
+    # 注意：调用 trap 的函数应当保证不会破坏 sp，否则这里的 trapframe 会不一致
 
     .globl __trapret
 __trapret:
     RESTORE_ALL
-    # go back from supervisor call
+    # 从 supervisor 模式返回到发生 trap 的上下文
     sret
- 
+
     .globl forkrets
 forkrets:
-    # set stack to this new process's trapframe
+    # 为子进程设置栈为它自己的 trapframe（a0 里传入子进程的 trapframe 地址）
     move sp, a0
+    # 直接跳到 __trapret 恢复寄存器并返回到用户态
     j __trapret
