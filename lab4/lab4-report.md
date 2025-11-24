@@ -65,29 +65,27 @@
 
 ### 4.1. 练习0：填写已有实验
 
-已将 Lab3 中实现的时钟中断处理代码，正确填充到 Lab4 的 `kern/trap/trap.c` 文件中的 `trap_dispatch` 函数的 `IRQ_S_TIMER` 分支中。
+已将 Lab3 中实现的时钟中断处理代码，正确填充到 Lab4 的 `kern/trap/trap.c` 文件中的 `interrupt_handler` 函数 `IRQ_S_TIMER` 分支中。
 
 ### 4.2. 练习1：分配并初始化一个进程控制块
 
 #### 设计实现过程
 
-`alloc_proc` 函数的目标是从一个预定义的进程表中找到一个空闲的 `proc_struct` 结构，并将其所有字段初始化为一个安全、明确的初始状态。
+`alloc_proc` 函数的目标是分配一个 proc_struct 并初始化所有字段。
 
-我们的实现步骤如下：
-1.  遍历静态进程数组 `proc_table`，查找 `state` 字段为 `PROC_UNINIT` 的条目，这表示该 `proc_struct` 是空闲的。
-2.  找到后，为防止在初始化过程中被再次分配，我们首先将其状态设置为一个中间状态 `PROC_EMBRYO`（萌芽态）。
-3.  对 `proc_struct` 的所有成员变量进行初始化：
-    *   将 `pid` 设置为-1，表示尚未分配。
-    *   将 `kstack`, `runs` 等数值型成员设为0。
-    *   将 `parent`, `mm`, `tf` 等指针成员设为 `NULL`。
-    *   **关键一步**：使用 `memset` 将 `context` 结构体清零，确保在首次切换时不会加载到随机的寄存器值。
-    *   对于内核线程，其页目录 `pgdir` 暂时指向内核页目录 `boot_pgdir_pa`，因为所有内核线程共享内核地址空间。
-    *   使用 `memset` 清空进程名 `name`。
+我们的实现过程主要是，对 `proc_struct` 的所有成员变量进行初始化：
+
+*   将 `pid` 设置为-1，表示尚未分配。
+*   将 `kstack`, `runs` 等数值型成员设为0。
+*   将 `parent`, `mm`, `tf` 等指针成员设为 `NULL`。
+*   **关键一步**：使用 `memset` 将 `context` 结构体清零，确保在首次切换时不会加载到随机的寄存器值。
+*   对于内核线程，其页目录 `pgdir` 暂时指向内核页目录 `boot_pgdir_pa`，因为所有内核线程共享内核地址空间。
+*   使用 `memset` 清空进程名 `name`。
 
 完成后的代码如下：
 ```c
 // kern/process/proc.c :: alloc_proc()
-proc->state = PROC_EMBRYO;      // 设置为萌芽态，防止重入
+proc->state = PROC_UNINIT;      // 设置为未初始化状态
 proc->pid = -1;                 // 尚未分配PID
 proc->runs = 0;                 // 运行次数清零
 proc->kstack = 0;               // 内核栈尚未分配
@@ -127,7 +125,7 @@ memset(proc->name, 0, PROC_NAME_LEN + 1); // 进程名清空
 1.  **分配PCB**: 调用 `alloc_proc()` 获取一个已初始化的 `proc_struct`。若失败则直接退出。
 2.  **设置父子关系**: 将新进程的 `parent` 指针指向当前运行的进程 `current`。
 3.  **分配内核栈**: 调用 `setup_kstack()` 为新进程分配一块独立的内核栈空间。若失败，需回滚已分配的 `proc_struct`。
-4.  **复制内存管理**: 调用 `copy_mm()`。对于内核线程，此步很简单，主要是设置 `pgdir` 指向内核页表，因为它们共享内存空间。若失败，则回滚内核栈和PCB。
+4.  **复制内存管理**: 调用 `copy_mm()`。对于本实验的纯内核线程，这一步仅会断言当前进程 `mm` 为空然后返回成功，真正的页表指针在 `alloc_proc()` 中已经预设为 `boot_pgdir_pa`。若失败，则回滚内核栈和PCB。
 5.  **设置启动状态**: 调用 `copy_thread()`，这是最关键的一步。它将 `kernel_thread` 准备好的临时 `trapframe` 复制到新进程内核栈的顶部，并精心构造 `context`，特别是将返回地址 `ra` 指向 `forkret`，为新线程的“冷启动”做好准备。
 6.  **赋予唯一身份并加入队列**: 在**关闭中断**的保护下，为新进程分配一个唯一的PID (`get_pid()`)，并将其加入到全局的 `proc_list` 和哈希表中。关中断确保了这一系列操作的原子性。
 7.  **唤醒进程**: 调用 `wakeup_proc()` 将新进程的状态从 `PROC_EMBRYO` 置为 `PROC_RUNNABLE`，使其能够被调度器发现。
@@ -152,10 +150,12 @@ int do_fork(...) {
     // 5. 复制线程状态，设置启动点
     copy_thread(proc, stack, tf);
 
-    // 6. (关中断) 分配PID，加入进程列表
+    // 6. (关中断) 分配PID，加入进程列表和哈希表
     local_intr_save(intr_flag);
     proc->pid = get_pid();
+    hash_proc(proc);
     list_add(&proc_list, &(proc->list_link));
+    nr_process++;
     local_intr_restore(intr_flag);
 
     // 7. 唤醒新进程
@@ -168,16 +168,21 @@ int do_fork(...) {
 
 #### 问题回答
 
-**请说明ucore是否做到给每个新fork的线程一个唯一的id？请说明你的分析和理由。**
+**请说明ucore是否做到给每个新fork的线程一个唯一的id?请说明你的分析和理由。**
 
-是的，ucore 通过 `get_pid()` 函数的设计和调用时的保护机制，**确保了**为每个新 fork 的线程分配一个唯一的ID。
+是的,ucore 通过 `get_pid()` 函数的设计和调用时的保护机制,**确保了**为每个新 fork 的线程分配一个唯一的ID。
 
-理由如下：
-1.  **线性递增与循环使用**: `get_pid()` 内部使用一个静态变量 `last_pid` 来记录上一次分配的ID。每次分配时，它会循环递增 `last_pid` (`(last_pid + 1) % MAX_PID`)，尝试分配下一个ID。
-2.  **冲突检测机制**: 在确定一个候选PID后，`get_pid()` 会**遍历整个 `proc_list`**，检查该ID是否已经被其他现存进程占用。如果存在冲突，它会继续递增并再次检查，直到找到一个未被使用的ID为止。
-3.  **原子性保证**: `do_fork` 在调用 `get_pid()` 以及后续将新进程加入 `proc_list` 的整个过程中，使用了 `local_intr_save()` 和 `local_intr_restore()` 来**关闭和恢复中断**。这形成了一个临界区，防止了在单核CPU上因中断而导致的并发问题，确保了“分配PID”和“注册该PID”这两个步骤之间不会被其他进程创建流程打断，从而避免了两个进程获取到相同PID的竞态条件。
+理由如下:
+1.  **线性递增与循环使用**: `get_pid()` 内部使用一个静态变量 `last_pid` 来记录上一次分配的ID。每次分配时,它会自增 `last_pid`,当达到 `MAX_PID` 时会回绕到 1(PID=0 保留给 `idleproc`),实现循环使用。
+2.  **优化的冲突检测机制**: `get_pid()` 采用了一个高效的算法来确保唯一性:
+    *   维护一个 `next_safe` 变量,表示下一个已知会冲突的PID上界。当 `last_pid < next_safe` 时,可以直接返回 `last_pid` 而无需扫描。
+    *   当 `last_pid >= next_safe` 时,才遍历整个 `proc_list`,检查候选 `last_pid` 是否被占用:
+        *   如果发现冲突(`proc->pid == last_pid`),则递增 `last_pid` 并根据需要重新扫描。
+        *   同时更新 `next_safe` 为遇到的下一个最小的已占用PID,以优化后续分配。
+    *   这种设计大幅减少了不必要的链表遍历,提高了分配效率。
+3.  **原子性保证**: `do_fork` 在调用 `get_pid()` 以及后续将新进程加入 `proc_list` 的整个过程中,使用了 `local_intr_save()` 和 `local_intr_restore()` 来**关闭和恢复中断**。这形成了一个临界区,防止了在单核CPU上因中断而导致的并发问题,确保了"分配PID"和"注册该PID"这两个步骤之间不会被其他进程创建流程打断,从而避免了两个进程获取到相同PID的竞态条件。
 
-综上，通过“递增-检查-重试”的算法和中断屏蔽的并发保护，ucore 可靠地实现了PID的唯一性分配。
+综上,通过"递增+安全区间优化"的高效算法和中断屏蔽的并发保护,ucore 可靠地实现了PID的唯一性分配。
 
 ### 4.4. 练习3：编写 proc_run 函数
 
@@ -225,7 +230,7 @@ void proc_run(struct proc_struct *proc) {
 在本实验的执行过程中，总共**创建并运行了2个内核线程**。
 
 1.  **`idleproc` (PID=0)**: 这是系统在 `proc_init()` 中创建的第一个内核线程。它并非通过 `do_fork` 创建，而是将内核初始化后的主执行流“包装”而成。它的任务是执行 `cpu_idle()`，在系统空闲时让出CPU。它**运行了**，因为它执行了 `cpu_idle` 并最终调用 `schedule()`。
-2.  **`initproc` (PID=1)**: 这是由 `idleproc` 调用 `kernel_thread()` 函数创建的第一个“真正”的内核线程。`schedule()` 函数会选择它作为下一个运行的进程。它的任务是执行 `init_main` 函数，打印 "Hello world!!"。从实验输出可以看到这行信息，证明 `initproc` 也**运行了**。
+2.  **`initproc` (PID=1)**: 这是由 `idleproc` 调用 `kernel_thread()` 函数创建的第一个“真正”的内核线程。`schedule()` 函数会选择它作为下一个运行的进程。它的任务是执行 `init_main` 函数，依次打印“这是 initproc...”以及 `To U: "Hello world!!"`、`To U: "en.., Bye, Bye. :)"` 等信息。从实验输出可以看到这些内容，证明 `initproc` 也**运行了**。
 
 因此，实验成功创建了 `idleproc` 和 `initproc` 两个内核线程，并且通过调度机制，两者都获得了CPU执行时间。
 
@@ -237,8 +242,7 @@ void proc_run(struct proc_struct *proc) {
 
 **实现原理**:
 1.  **`local_intr_save(intr_flag)`**:
-    *   **保存状态**: 首先，它读取 `sstatus` 寄存器，并检查其中的 `SIE` (Supervisor Interrupt Enable) 位。如果 `SIE` 为1，表示中断当前是开启的，于是将 `intr_flag` 设为一个真值（如1）。如果 `SIE` 为0，则 `intr_flag` 为假（0）。这一步**保存了进入临界区前的中断状态**。
-    *   **关闭中断**: 无论之前状态如何，它都会执行 `intr_disable()`，即清除 `sstatus` 寄存器中的 `SIE` 位，**强制关闭中断**，以保护接下来的临界区代码。
+    *   **保存状态**: 首先，它读取 `sstatus` 寄存器，并检查其中的 `SIE` (Supervisor Interrupt Enable) 位。如果 `SIE` 为1，表示中断当前是开启的，于是将 `intr_flag` 设为真并调用 `intr_disable()` 关闭中断；如果 `SIE` 为0，则 `intr_flag` 为假且不会重复执行关闭操作。这一步**既保存了进入临界区前的中断状态，也避免了多余的关中断指令**。
 
 2.  **`local_intr_restore(intr_flag)`**:
     *   **恢复状态**: 它检查传入的 `intr_flag`。如果 `intr_flag` 为真（意味着进入前中断是开启的），它就调用 `intr_enable()`，重新设置 `sstatus` 的 `SIE` 位，**恢复中断**。如果 `intr_flag` 为假，它什么也不做，保持中断关闭。
