@@ -117,6 +117,13 @@ alloc_proc(void)
             proc->pgdir = boot_pgdir_pa; // 使用内核页目录表物理地址
             proc->flags = 0;             // 标志位为0
             memset(proc->name, 0, PROC_NAME_LEN + 1);  // 清空进程名
+            
+            // LAB5: 初始化新增的字段
+            proc->exit_code = 0;         // 退出码
+            proc->wait_state = 0;        // 等待状态
+            proc->cptr = NULL;           // 子进程指针
+            proc->yptr = NULL;           // 年轻兄弟进程指针
+            proc->optr = NULL;           // 年长兄弟进程指针
     }
     return proc;
 }
@@ -477,14 +484,14 @@ int do_fork(uint32_t clone_flags, uintptr_t stack, struct trapframe *tf)
         // 4. 调用 copy_thread 设置 trapframe 和 context
         copy_thread(proc, stack, tf);
         
-        // 5. 插入 hash_list 和 proc_list
+        // 5. 插入 hash_list 和 proc_list，并设置进程家族关系
         bool intr_flag;
         local_intr_save(intr_flag);
         {
                 proc->pid = get_pid();
                 hash_proc(proc);
-                list_add(&proc_list, &(proc->list_link));
-                nr_process++;
+                // LAB5: 使用 set_links 来设置进程家族关系（父子、兄弟）
+                set_links(proc);
         }
         local_intr_restore(intr_flag);
         
@@ -593,7 +600,7 @@ load_icode(unsigned char *binary, size_t size)
         goto bad_pgdir_cleanup_mm;
     }
     //(3) copy TEXT/DATA section, build BSS parts in binary to memory space of process
-    struct Page *page;
+    struct Page *page = NULL;
     //(3.1) get the file header of the bianry program (ELF format)
     struct elfhdr *elf = (struct elfhdr *)binary;
     //(3.2) get the entry of the program section headers of the bianry program (ELF format)
@@ -729,6 +736,18 @@ load_icode(unsigned char *binary, size_t size)
      *          tf->status should be appropriate for user program (the value of sstatus)
      *          hint: check meaning of SPP, SPIE in SSTATUS, use them by SSTATUS_SPP, SSTATUS_SPIE(defined in risv.h)
      */
+    
+    // 设置用户栈指针：指向用户栈顶
+    tf->gpr.sp = USTACKTOP;
+    
+    // 设置程序入口地址：ELF文件头中的 e_entry 字段
+    tf->epc = elf->e_entry;
+    
+    // 设置 sstatus 寄存器：
+    // - SSTATUS_SPIE = 1: sret 返回后开启中断
+    // - SSTATUS_SPP = 0: sret 返回到用户态 (U mode)
+    // 由于前面 memset 已经清零，SPP 已经是 0，只需设置 SPIE
+    tf->status = (sstatus & ~SSTATUS_SPP) | SSTATUS_SPIE;
 
     ret = 0;
 out:

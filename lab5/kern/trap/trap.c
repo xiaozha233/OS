@@ -132,11 +132,9 @@ void interrupt_handler(struct trapframe *tf)
             ticks++; // 计数器加一
             if (ticks % TICK_NUM == 0) { // 每100次时钟中断
                 print_ticks(); // 打印 "100 ticks"
-                static int num = 0; // 打印次数计数器
-                num++;
-                if (num == 10) { // 打印10次后关机
-                    sbi_shutdown();
-                }
+                // LAB5: 设置调度标志，触发进程调度
+                assert(current != NULL);
+                current->need_resched = 1;
             }
         }
         break;
@@ -217,12 +215,21 @@ void exception_handler(struct trapframe *tf)
         break;
     case CAUSE_FETCH_PAGE_FAULT:
         cprintf("Instruction page fault\n");
+        if (current != NULL && !trap_in_kernel(tf)) {
+            do_exit(-E_KILLED);
+        }
         break;
     case CAUSE_LOAD_PAGE_FAULT:
         cprintf("Load page fault\n");
+        if (current != NULL && !trap_in_kernel(tf)) {
+            do_exit(-E_KILLED);
+        }
         break;
     case CAUSE_STORE_PAGE_FAULT:
         cprintf("Store/AMO page fault\n");
+        if (current != NULL && !trap_in_kernel(tf)) {
+            do_exit(-E_KILLED);
+        }
         break;
     default:
         print_trapframe(tf);
