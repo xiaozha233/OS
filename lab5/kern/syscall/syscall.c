@@ -63,7 +63,7 @@ sys_pgdir(uint64_t arg[]) {
     //print_pgdir();
     return 0;
 }
-
+// 系统调用分发表，根据系统调用号索引到对应的处理函数
 static int (*syscalls[])(uint64_t arg[]) = {
     [SYS_exit]              sys_exit,
     [SYS_fork]              sys_fork,
@@ -78,23 +78,29 @@ static int (*syscalls[])(uint64_t arg[]) = {
 
 #define NUM_SYSCALLS        ((sizeof(syscalls)) / (sizeof(syscalls[0])))
 
+// 内核的系统调用分发入口，由异常/中断处理流程中的 trap() 或 exception_handler() 调用
+// 上下文：调用时在内核态且处于中断处理流程中（CPU 寄存器已被 trapentry.S 保存到内核栈上的 trapframe）
 void
 syscall(void) {
     struct trapframe *tf = current->tf;
-    uint64_t arg[5];
-    int num = tf->gpr.a0;
+    uint64_t arg[5]; // 为最多5个syscall参数预分配缓存数组
+    int num = tf->gpr.a0; // 读取syscall号
     if (num >= 0 && num < NUM_SYSCALLS) {
         if (syscalls[num] != NULL) {
+            // 将最多 5 个参数从 trapframe 的寄存器 a1..a5 复制到 arg[]。
             arg[0] = tf->gpr.a1;
             arg[1] = tf->gpr.a2;
             arg[2] = tf->gpr.a3;
             arg[3] = tf->gpr.a4;
             arg[4] = tf->gpr.a5;
+            // 根据 syscall 号调用对应的处理函数，返回值存回 a0
             tf->gpr.a0 = syscalls[num](arg);
             return ;
         }
     }
+    // 如果执行到这里表示syscall非法，打印trapframe供调试
     print_trapframe(tf);
+    // 内核遇到非法 syscall 编号会调用 panic 打印错误并停止内核（终止整个 OS）
     panic("undefined syscall %d, pid = %d, name = %s.\n",
             num, current->pid, current->name);
 }

@@ -6,13 +6,13 @@
 #include <trap.h>
 #include <memlayout.h>
 
-// process's state in his life cycle
+// 进程在其生命周期中的状态
 enum proc_state
 {
-    PROC_UNINIT = 0, // uninitialized
-    PROC_SLEEPING,   // sleeping
-    PROC_RUNNABLE,   // runnable(maybe running)
-    PROC_ZOMBIE,     // almost dead, and wait parent proc to reclaim his resource
+    PROC_UNINIT = 0, // 未初始化
+    PROC_SLEEPING,   // 睡眠
+    PROC_RUNNABLE,   // 可运行（可能正在运行）
+    PROC_ZOMBIE,     // 几乎死亡，等待父进程回收其资源
 };
 
 struct context
@@ -41,29 +41,30 @@ extern list_entry_t proc_list;
 
 struct proc_struct
 {
-    enum proc_state state;                  // Process state
-    int pid;                                // Process ID
-    int runs;                               // the running times of Proces
-    uintptr_t kstack;                       // Process kernel stack
-    volatile bool need_resched;             // bool value: need to be rescheduled to release CPU?
-    struct proc_struct *parent;             // the parent process
-    struct mm_struct *mm;                   // Process's memory management field
-    struct context context;                 // Switch here to run process
-    struct trapframe *tf;                   // Trap frame for current interrupt
-    uintptr_t pgdir;                        // the base addr of Page Directroy Table(PDT)
-    uint32_t flags;                         // Process flag
-    char name[PROC_NAME_LEN + 1];           // Process name
-    list_entry_t list_link;                 // Process link list
-    list_entry_t hash_link;                 // Process hash list
-    int exit_code;                          // exit code (be sent to parent proc)
-    uint32_t wait_state;                    // waiting state
-    struct proc_struct *cptr, *yptr, *optr; // relations between processes
+    enum proc_state state;                  // 进程状态
+    int pid;                                // 进程 ID
+    int runs;                               // 进程运行次数
+    uintptr_t kstack;                       // 进程内核栈
+    volatile bool need_resched;             // 布尔值：是否需要重新调度以释放 CPU？
+    struct proc_struct *parent;             // 父进程
+    struct mm_struct *mm;                   // 进程的内存管理结构
+    struct context context;                 // 在此切换上下文以运行该进程
+    struct trapframe *tf;                   // 当前中断的陷阱帧
+    uintptr_t pgdir;                        // 页目录表（PDT）的基址
+    uint32_t flags;                         // 进程标志
+    char name[PROC_NAME_LEN + 1];           // 进程名
+    list_entry_t list_link;                 // 进程链表
+    list_entry_t hash_link;                 // 进程哈希链表
+    // =======  lab5新增  ========
+    int exit_code;                          // 退出码（发送给父进程）
+    uint32_t wait_state;                    // 等待状态
+    struct proc_struct *cptr, *yptr, *optr; // 进程之间的关系
 };
 
-#define PF_EXITING 0x00000001 // getting shutdown
+#define PF_EXITING 0x00000001 // 正在退出
 
-#define WT_CHILD (0x00000001 | WT_INTERRUPTED)
-#define WT_INTERRUPTED 0x80000000 // the wait state could be interrupted
+#define WT_CHILD (0x00000001 | WT_INTERRUPTED)  // 等待子进程退出
+#define WT_INTERRUPTED 0x80000000 // 等待状态可能被中断
 
 #define le2proc(le, member) \
     to_struct((le), struct proc_struct, member)
