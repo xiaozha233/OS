@@ -178,11 +178,14 @@ void exception_handler(struct trapframe *tf)
         break;
     case CAUSE_BREAKPOINT:
         cprintf("Breakpoint\n");
+        // a7寄存器的值为10，表示这是从 kernel_execve 发出的特殊 ebreak。
         if (tf->gpr.a7 == 10)
         {
             tf->epc += 4;
-            syscall();
+            syscall(); // 这个syscall调用的就是sys_exec，从而调用do_execve
+            // 在 kernel_execve_ret() 中把 trapframe 复制到用户进程的内核栈上，从而用 sret 返回到用户态
             kernel_execve_ret(tf, current->kstack + KSTACKSIZE);
+            // 注意这是汇编函数，其定义在trapentry.S中
         }
         break;
     case CAUSE_MISALIGNED_LOAD:
@@ -200,7 +203,7 @@ void exception_handler(struct trapframe *tf)
     case CAUSE_USER_ECALL:
         // cprintf("Environment call from U-mode\n");
         tf->epc += 4;
-        syscall();
+        syscall(); // 用户端执行fork()后，sysfork()->syscall()->ecall，进入这里，执行内核trap->syscall分发
         break;
     case CAUSE_SUPERVISOR_ECALL:
         cprintf("Environment call from S-mode\n");

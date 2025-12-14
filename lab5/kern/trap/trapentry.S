@@ -143,7 +143,7 @@ kernel_execve_ret:
     // adjust sp to beneath kstacktop of current process
     addi a1, a1, -36*REGBYTES
 
-    // copy from previous trapframe to new trapframe
+    // 把新的 trapframe 从 a0 复制到 a1 指向的内核栈位置，即当前进程的新内核栈顶
     LOAD s1, 35*REGBYTES(a0)
     STORE s1, 35*REGBYTES(a1)
     LOAD s1, 34*REGBYTES(a0)

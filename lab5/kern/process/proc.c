@@ -304,12 +304,15 @@ find_proc(int pid)
 // 注: 临时 trapframe (tf) 的内容会在 do_fork->copy_thread 中被复制到 proc->tf
 int kernel_thread(int (*fn)(void *), void *arg, uint32_t clone_flags)
 {
+    // 构造临时 trapframe，将 fn 和 arg 写入寄存器（s0/s1）
+    // 并把tf.epc 设为 kernel_thread_entry（汇编入口点）
     struct trapframe tf;
     memset(&tf, 0, sizeof(struct trapframe));
     tf.gpr.s0 = (uintptr_t)fn;
     tf.gpr.s1 = (uintptr_t)arg;
     tf.status = (read_csr(sstatus) | SSTATUS_SPP | SSTATUS_SPIE) & ~SSTATUS_SIE;
     tf.epc = (uintptr_t)kernel_thread_entry;
+    // 调用 do_fork 创建真正的proc_struct
     return do_fork(clone_flags | CLONE_VM, 0, &tf);
 }
 
@@ -337,12 +340,15 @@ put_kstack(struct proc_struct *proc)
 static int
 setup_pgdir(struct mm_struct *mm)
 {
+    // 首先使用alloc_page创建一页作为页目录（PDT，即最高级页表）
     struct Page *page;
     if ((page = alloc_page()) == NULL)
     {
         return -E_NO_MEM;
     }
     pde_t *pgdir = page2kva(page);
+    // 把 boot_pgdir_va （内核启动页目录）复制到新页目录中，确保新进程页表也包含内核的映射（内核地址永远映射）
+    // 当 CPU 切换到新进程运行（CR3 指向新页目录）时，CPU 依然能够"看见"并访问内核的代码和数据。
     memcpy(pgdir, boot_pgdir_va, PGSIZE);
 
     mm->pgdir = pgdir;
@@ -407,7 +413,7 @@ bad_mm:
     return ret;
 }
 
-// copy_thread - 在进程的内核栈顶设置 trapframe
+// copy_thread - 在进程的内核栈顶设置之前构造好的 trapframe
 //             - 并设置进程的内核入口点和内核栈
 static void
 copy_thread(struct proc_struct *proc, uintptr_t esp, struct trapframe *tf)
@@ -417,6 +423,7 @@ copy_thread(struct proc_struct *proc, uintptr_t esp, struct trapframe *tf)
 
     // 将 a0 设为 0，以便子进程知道它是刚 fork 出来的
     proc->tf->gpr.a0 = 0;
+    // esp 为 0 表示内核线程，为sp赋值为proc->tf，否则为用户栈指针
     proc->tf->gpr.sp = (esp == 0) ? (uintptr_t)proc->tf : esp;
 
     proc->context.ra = (uintptr_t)forkret;
@@ -430,84 +437,84 @@ copy_thread(struct proc_struct *proc, uintptr_t esp, struct trapframe *tf)
  */
 int do_fork(uint32_t clone_flags, uintptr_t stack, struct trapframe *tf)
 {
-        int ret = -E_NO_FREE_PROC;
-        struct proc_struct *proc;
-        if (nr_process >= MAX_PROCESS)
-        {
-                goto fork_out;
-        }
-        ret = -E_NO_MEM;
-        // LAB4: 实验4 练习2 (2314035)
-        /*
-         * 一些有用的宏和函数，你可以在下面实现中使用。
-         * 宏或函数：
-         *   alloc_proc:   创建并初始化 proc_struct（实验4:练习1）
-         *   setup_kstack: 分配 KSTACKPAGE 大小的页作为进程内核栈
-         *   copy_mm:      按照 clone_flags 复制或共享 mm
-         *                 如果 clone_flags & CLONE_VM，则共享，否则复制
-         *   copy_thread:  设置 trapframe 和 context
-         *   hash_proc:    加入哈希链表
-         *   get_pid:      分配唯一 pid
-         *   wakeup_proc:  设置 proc->state = PROC_RUNNABLE
-         * 变量:
-         *   proc_list:    进程集合链表
-         *   nr_process:   进程数
-         */
+    int ret = -E_NO_FREE_PROC;
+    struct proc_struct *proc;
+    if (nr_process >= MAX_PROCESS)
+    {
+            goto fork_out;
+    }
+    ret = -E_NO_MEM;
+    // LAB4: 实验4 练习2 (2314035)
+    /*
+        * 一些有用的宏和函数，你可以在下面实现中使用。
+        * 宏或函数：
+        *   alloc_proc:   创建并初始化 proc_struct（实验4:练习1）
+        *   setup_kstack: 分配 KSTACKPAGE 大小的页作为进程内核栈
+        *   copy_mm:      按照 clone_flags 复制或共享 mm
+        *                 如果 clone_flags & CLONE_VM，则共享，否则复制
+        *   copy_thread:  设置 trapframe 和 context
+        *   hash_proc:    加入哈希链表
+        *   get_pid:      分配唯一 pid
+        *   wakeup_proc:  设置 proc->state = PROC_RUNNABLE
+        * 变量:
+        *   proc_list:    进程集合链表
+        *   nr_process:   进程数
+        */
 
-        //    1. 调用 alloc_proc 分配 proc_struct
-        //    2. 调用 setup_kstack 分配内核栈
-        //    3. 调用 copy_mm 复制或共享 mm
-        //    4. 调用 copy_thread 设置 trapframe 和 context
-        //    5. 插入 hash_list 和 proc_list
-        //    6. 调用 wakeup_proc 使新进程变为 RUNNABLE
-        //    7. 用子进程 pid 设置返回值
-        
-        // 1. 调用 alloc_proc 分配 proc_struct
-        if ((proc = alloc_proc()) == NULL) {
-                goto fork_out;
-        }
-        
-        // 设置父进程为当前进程
-        proc->parent = current;
-        
-        // 2. 调用 setup_kstack 分配内核栈
-        if (setup_kstack(proc) != 0) {
-                goto bad_fork_cleanup_proc;
-        }
-        
-        // 3. 调用 copy_mm 复制或共享 mm
-        if (copy_mm(clone_flags, proc) != 0) {
-                goto bad_fork_cleanup_kstack;
-        }
-        
-        // 4. 调用 copy_thread 设置 trapframe 和 context
-        copy_thread(proc, stack, tf);
-        
-        // 5. 插入 hash_list 和 proc_list，并设置进程家族关系
-        bool intr_flag;
-        local_intr_save(intr_flag);
-        {
-                proc->pid = get_pid();
-                hash_proc(proc);
-                // LAB5: 使用 set_links 来设置进程家族关系（父子、兄弟）
-                set_links(proc);
-        }
-        local_intr_restore(intr_flag);
-        
-        // 6. 调用 wakeup_proc 使新进程变为 RUNNABLE
-        wakeup_proc(proc);
-        
-        // 7. 用子进程 pid 设置返回值
-        ret = proc->pid;
+    //    1. 调用 alloc_proc 分配 proc_struct
+    //    2. 调用 setup_kstack 分配内核栈
+    //    3. 调用 copy_mm 复制或共享 mm
+    //    4. 调用 copy_thread 设置 trapframe 和 context
+    //    5. 插入 hash_list 和 proc_list
+    //    6. 调用 wakeup_proc 使新进程变为 RUNNABLE
+    //    7. 用子进程 pid 设置返回值
+    
+    // 1. 调用 alloc_proc 分配 proc_struct
+    if ((proc = alloc_proc()) == NULL) {
+            goto fork_out;
+    }
+    
+    // 设置父进程为当前进程
+    proc->parent = current;
+    
+    // 2. 调用 setup_kstack 分配内核栈
+    if (setup_kstack(proc) != 0) {
+            goto bad_fork_cleanup_proc;
+    }
+    
+    // 3. 调用 copy_mm 复制或共享 mm
+    if (copy_mm(clone_flags, proc) != 0) {
+            goto bad_fork_cleanup_kstack;
+    }
+    
+    // 4. 调用 copy_thread 设置 trapframe 和 context
+    copy_thread(proc, stack, tf);
+    
+    // 5. 插入 hash_list 和 proc_list，并设置进程家族关系
+    bool intr_flag;
+    local_intr_save(intr_flag);
+    {
+            proc->pid = get_pid();
+            hash_proc(proc);
+            // LAB5: 使用 set_links 来设置进程家族关系（父子、兄弟）
+            set_links(proc);
+    }
+    local_intr_restore(intr_flag);
+    
+    // 6. 调用 wakeup_proc 使新进程变为 RUNNABLE
+    wakeup_proc(proc);
+    
+    // 7. 用子进程 pid 设置返回值
+    ret = proc->pid;
         
 fork_out:
-        return ret;
+    return ret;
 
 bad_fork_cleanup_kstack:
-        put_kstack(proc);
+    put_kstack(proc);
 bad_fork_cleanup_proc:
-        kfree(proc);
-        goto fork_out;
+    kfree(proc);
+    goto fork_out;
 }
 
 
@@ -581,6 +588,7 @@ int do_exit(int error_code)
 static int
 load_icode(unsigned char *binary, size_t size)
 {
+    // 当前进程current->mm 必须为空，因为do_execve在调用load_icode之前已经释放了原来的mm
     if (current->mm != NULL)
     {
         panic("load_icode: current->mm must be empty.\n");
@@ -593,7 +601,7 @@ load_icode(unsigned char *binary, size_t size)
     {
         goto bad_mm;
     }
-    //(2) 创建页目录（PDT），并将 mm->pgdir 设为该页目录的内核虚拟地址
+    //(2) 创建页目录（PDT，即最高级页表），并将 mm->pgdir 设为该页目录的内核虚拟地址
     if (setup_pgdir(mm) != 0)
     {
         goto bad_pgdir_cleanup_mm;
@@ -615,7 +623,7 @@ load_icode(unsigned char *binary, size_t size)
     struct proghdr *ph_end = ph + elf->e_phnum;
     for (; ph < ph_end; ph++)
     {
-        //(3.4) 遍历每个程序段（program header）
+        //(3.4) 遍历每个程序段（program header）的可加载段（ELF_PT_LOAD）
         if (ph->p_type != ELF_PT_LOAD)
         {
             continue;
@@ -655,10 +663,12 @@ load_icode(unsigned char *binary, size_t size)
         ret = -E_NO_MEM;
 
         //(3.6) 为每个程序段分配内存，并将段内容复制到进程地址空间 (la, la+end)
+        // 也就是将文件中的内容复制到内存中
         end = ph->p_va + ph->p_filesz;
         //(3.6.1) 复制二进制程序的 TEXT/DATA 段
         while (start < end)
         {
+            // 调用 pgdir_alloc_page 为 la 分配物理页
             if ((page = pgdir_alloc_page(mm->pgdir, la, perm)) == NULL)
             {
                 goto bad_cleanup_mmap;
@@ -672,7 +682,7 @@ load_icode(unsigned char *binary, size_t size)
             start += size, from += size;
         }
 
-        //(3.6.2) 构建二进制程序的 BSS 段
+        //(3.6.2) 构建二进制程序的 BSS 段(文件中没有数据，内存中需要为其划零)
         end = ph->p_va + ph->p_memsz;
         if (start < la)
         {
@@ -706,6 +716,7 @@ load_icode(unsigned char *binary, size_t size)
         }
     }
     //(4) 构建用户栈内存
+    // 先在 VMA 中注册栈区（mm_map()），再分配几页页面写入页表，使用户栈能够使用。
     vm_flags = VM_READ | VM_WRITE | VM_STACK;
     if ((ret = mm_map(mm, USTACKTOP - USTACKSIZE, USTACKSIZE, vm_flags, NULL)) != 0)
     {
@@ -716,13 +727,13 @@ load_icode(unsigned char *binary, size_t size)
     assert(pgdir_alloc_page(mm->pgdir, USTACKTOP - 3 * PGSIZE, PTE_USER) != NULL);
     assert(pgdir_alloc_page(mm->pgdir, USTACKTOP - 4 * PGSIZE, PTE_USER) != NULL);
 
-    //(5) 设置当前进程的 mm、sr3，并将 satp 寄存器设为页目录的物理地址
+    //(5) 设置当前进程的 mm、pgdir，并将 satp 寄存器切换到该页表
     mm_count_inc(mm);
     current->mm = mm;
     current->pgdir = PADDR(mm->pgdir);
     lsatp(PADDR(mm->pgdir));
 
-    //(6) 为用户态环境设置 trapframe
+    //(6) 为用户态环境设置 trapframe，因为是从内核态返回，所以我们通过设置 trapframe 来设置返回到用户态时的寄存器值
     struct trapframe *tf = current->tf;
     // 保留 sstatus 的值
     uintptr_t sstatus = tf->status;
@@ -745,7 +756,7 @@ load_icode(unsigned char *binary, size_t size)
     // 设置 sstatus 寄存器：
     // - SSTATUS_SPIE = 1: sret 返回后开启中断
     // - SSTATUS_SPP = 0: sret 返回到用户态 (U mode)
-    // 由于前面 memset 已经清零，SPP 已经是 0，只需设置 SPIE
+    // 由于前面 memset 已经清零，SPP 已经是 0，只需设置 SPIE为1，这样sret之后就会开启中断
     tf->status = (sstatus & ~SSTATUS_SPP) | SSTATUS_SPIE;
 
     ret = 0;
@@ -774,29 +785,30 @@ int do_execve(const char *name, size_t len, unsigned char *binary, size_t size)
     {
         len = PROC_NAME_LEN;
     }
-
+    // 把name拷贝到内核栈上的local_name中，因为替换current->mm之后，用户空间的name可能不可访问
     char local_name[PROC_NAME_LEN + 1];
     memset(local_name, 0, sizeof(local_name));
     memcpy(local_name, name, len);
-
+    // 进程有用户地址空间，进行释放
     if (mm != NULL)
     {
         cputs("mm != NULL");
-        lsatp(boot_pgdir_pa);
-        if (mm_count_dec(mm) == 0)
+        lsatp(boot_pgdir_pa); // 用 kernel 的页目录，使内核可安全访问页表与内核空间（详见下）
+        if (mm_count_dec(mm) == 0) // 没有人再使用
         {
-            exit_mmap(mm);
-            put_pgdir(mm);
-            mm_destroy(mm);
+            exit_mmap(mm); // 逐个VMA释放内存映射
+            put_pgdir(mm); // 释放页目录
+            mm_destroy(mm); // 销毁内存管理结构
         }
         current->mm = NULL;
     }
     int ret;
+    // 使用 load_icode 装载新程序
     if ((ret = load_icode(binary, size)) != 0)
     {
-        goto execve_exit;
+        goto execve_exit; // 失败则调用 do_exit 退出进程
     }
-    set_proc_name(current, local_name);
+    set_proc_name(current, local_name);// 设置进程名
     return 0;
 
 execve_exit:
@@ -827,10 +839,10 @@ int do_wait(int pid, int *code_store)
     struct proc_struct *proc;
     bool intr_flag, haskid;
 repeat:
-    haskid = 0;
+    haskid = 0; // 标记是否找到子进程
     if (pid != 0)
     {
-        proc = find_proc(pid);
+        proc = find_proc(pid);// pid 非 0，查找指定 pid 的子进程
         if (proc != NULL && proc->parent == current)
         {
             haskid = 1;
@@ -843,6 +855,7 @@ repeat:
     else
     {
         proc = current->cptr;
+        // pid 为 0，遍历所有子进程
         for (; proc != NULL; proc = proc->optr)
         {
             haskid = 1;
@@ -852,11 +865,12 @@ repeat:
             }
         }
     }
+    // 找到子进程但是没有处于 ZOMBIE 状态，进入睡眠等待子进程退出
     if (haskid)
     {
         current->state = PROC_SLEEPING;
-        current->wait_state = WT_CHILD;
-        schedule();
+        current->wait_state = WT_CHILD; // 设置等待状态为等待子进程
+        schedule();// 切换去运行其他进程
         if (current->flags & PF_EXITING)
         {
             do_exit(-E_KILLED);
@@ -911,16 +925,23 @@ kernel_execve(const char *name, unsigned char *binary, size_t size)
 {
     int64_t ret = 0, len = strlen(name);
     //   ret = do_execve(name, len, binary, size); // 注释掉的原始调用：执行 do_execve
+    // 不直接调用do_execve，而是通过设置寄存器并发出ebreak来触发异常处理路径（因此执行会经过 exception_handler）
+    /*
+    原因是：
+    do_execve / load_icode 的核心工作是“构造或修改当前进程的 trapframe（保存的寄存器、sepc、sstatus 等）”，并加载用户程序的页表、用户栈、入口点等
+    但“从内核态跳转到用户态执行”需要 CPU 使用 sret 指令才能由 CPU 的控制逻辑改变特权级（S-mode → U-mode）并把寄存器从 trapframe 恢复到实际的寄存器。
+    */
     asm volatile(
-        "li a0, %1\n"
+        "li a0, %1\n" // 系统调用号
         "lw a1, %2\n"
         "lw a2, %3\n"
         "lw a3, %4\n"
-        "lw a4, %5\n"
-        "li a7, 10\n"
-        "ebreak\n"
+        "lw a4, %5\n" // 几个syscall参数
+        "li a7, 10\n" // 把a7设为10作为哨兵，以便在 exception handler 中区分：如果 BREAK（ebreak）触发且 a7==10，则这是从 kernel_execve 发出的特殊 ebreak。
+        "ebreak\n" // 触发断点异常，CPU进入异常处理路径
         "sw a0, %0\n"
         : "=m"(ret)
+        // 注意这里"i"(SYS_exec)就是sys_exec的系统调用号
         : "i"(SYS_exec), "m"(name), "m"(len), "m"(binary), "m"(size)
         : "memory");
     cprintf("ret = %d\n", ret);
@@ -954,7 +975,7 @@ user_main(void *arg)
 #ifdef TEST
     KERNEL_EXECVE2(TEST, TESTSTART, TESTSIZE);
 #else
-    KERNEL_EXECVE(exit);
+    KERNEL_EXECVE(exit); // 执行用户程序 "exit"
 #endif
     panic("user_main execve failed.\n");
 }
@@ -963,18 +984,21 @@ user_main(void *arg)
 static int
 init_main(void *arg)
 {
+    // 这两个用于检测内存泄漏，不必深究
     size_t nr_free_pages_store = nr_free_pages();
     size_t kernel_allocated_store = kallocated();
-
+    // 通过 kernel_thread 创建 user_main 内核线程
     int pid = kernel_thread(user_main, NULL, 0);
+    // user_main在kernel_thread 的回调中被执行：user_main -> kernel_execve -> do_execve -> load_icode
     if (pid <= 0)
     {
         panic("create user_main failed.\n");
     }
-
+    // 等待任意子进程退出（pid == 0 表示 any child）
+    // 直到 do_wait 返回非 0（即没有子进程）为止
     while (do_wait(0, NULL) == 0)
     {
-        schedule();
+        schedule();// 使 init_main 放弃 CPU
     }
 
     cprintf("all user-mode processes have quit.\n");

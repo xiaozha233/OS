@@ -365,8 +365,8 @@ void exit_range(pde_t *pgdir, uintptr_t start, uintptr_t end)
 int copy_range(pde_t *to, pde_t *from, uintptr_t start, uintptr_t end,
                bool share)
 {
-    assert(start % PGSIZE == 0 && end % PGSIZE == 0);
-    assert(USER_ACCESS(start, end));
+    assert(start % PGSIZE == 0 && end % PGSIZE == 0); // 确保页对齐
+    assert(USER_ACCESS(start, end));// 确保是用户空间地址范围
     // 按页单位复制内容。
     do
     {
@@ -385,8 +385,8 @@ int copy_range(pde_t *to, pde_t *from, uintptr_t start, uintptr_t end,
             {
                 return -E_NO_MEM;
             }
-            uint32_t perm = (*ptep & PTE_USER);
-            // 从页表项获取页面
+            uint32_t perm = (*ptep & PTE_USER);// 从源PTE过滤出用户相关权限位，用于拷贝给目标
+            // 从A的页表项获取其物理页面
             struct Page *page = pte2page(*ptep);
             // 为进程 B 分配一个页面
             struct Page *npage = alloc_page();

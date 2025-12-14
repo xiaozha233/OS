@@ -14,9 +14,9 @@ sys_exit(uint64_t arg[]) {
 
 static int
 sys_fork(uint64_t arg[]) {
-    struct trapframe *tf = current->tf;
-    uintptr_t stack = tf->gpr.sp;
-    return do_fork(0, stack, tf);
+    struct trapframe *tf = current->tf; // 父进程的 trapframe
+    uintptr_t stack = tf->gpr.sp; // 父进程的用户栈指针
+    return do_fork(0, stack, tf); // 真正创建子进程
 }
 
 static int
