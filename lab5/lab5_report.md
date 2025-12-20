@@ -776,502 +776,277 @@ yield:  当前进程 RUNNING → RUNNABLE
 
 ## 分支任务：GDB调试系统调用
 
-### 调试准备
+本任务采用**双重 GDB（Double GDB）** 方案，通过三个终端协同工作，分别从“内核视角”和“模拟器视角”观察系统调用的完整流程。
 
-#### 启动 QEMU 并连接 GDB（客体侧）
+### 调试准备：三终端协同
 
-本仓库的 `Makefile` 已提供调试目标：
+我们需要开启三个终端窗口，分工如下：
 
-1) （可选）选择要跑的用户程序：
+*   **Terminal 1 (QEMU 运行)**：负责运行 QEMU 模拟器。
+*   **Terminal 2 (Guest GDB - 调试内核)**：连接 QEMU 的 gdbstub (localhost:1234)，用于调试 ucore 内核及用户程序。
+*   **Terminal 3 (Host GDB - 调试模拟器)**：Attach 到 QEMU 进程，用于调试 QEMU 自身的指令模拟与 TCG 翻译过程。
 
-```bash
-make build-exit
-```
+#### 启动步骤
 
-2) 启动 QEMU 并打开 gdbstub（会停在第一条指令，等待连接）：
+1.  **Terminal 1**：使用指定 QEMU 路径启动调试
+    ```bash
+    make build-exit
+    # 使用绝对路径指向带有符号的 QEMU
+    make debug QEMU=/root/build/qemu-4.1.1/riscv64-softmmu/qemu-system-riscv64
+    ```
 
-```bash
-make debug
-```
+2.  **Terminal 2**：启动客体 GDB 并连接
+    ```bash
+    make gdb
+    ```
+    此终端将作为我们控制 ucore 执行的主控制台。
 
-3) 另开一个终端连接客体 GDB：
+3.  **Terminal 2**：加载用户程序符号表
+    由于用户程序是链接进内核的，需手动加载符号以便调试：
+    ```gdb
+    (gdb) add-symbol-file obj/__user_exit.out
+    ```
 
-```bash
-make gdb
-```
+### 第一阶段：从内核视角观察（Guest GDB）
 
-后续所有 `gdb` 命令均在这份“客体 GDB”（`target remote localhost:1234`）里执行。
+本阶段主要在 **Terminal 2** 中操作，观察 ucore 内核如何处理系统调用。
 
-#### 加载用户程序符号表
+#### 1. 在内核 syscall 处设置断点
 
-由于用户程序采用“Link-in-Kernel”方式编译进内核镜像，内核符号表里默认不包含用户 ELF 的调试信息。要在 GDB 里看到用户态源码/符号，需要手动加载对应的用户 ELF（例如 `exit` 对应 `obj/__user_exit.out`）。
-
-注意：用户程序的链接地址由 `tools/user.ld` 指定（本仓库为 `0x800020`）。如果 GDB 不能自动识别 ELF 段地址，可在 `add-symbol-file` 后显式给出 `.text` 起始地址。
-
-```gdb
-(gdb) add-symbol-file obj/__user_exit.out
-add symbol table from file "obj/__user_exit.out"
-(y or n) y
-Reading symbols from obj/__user_exit.out...
-
-# 备选（仅当上面方式无法正确对应地址时）：
-# (gdb) add-symbol-file obj/__user_exit.out 0x800020
-```
-
-
-### 调试记录：ecall 与 sret 的完整观察
-
-以下是使用 `make debug` + `make gdb` 实际调试 `exit` 用户程序时的输出记录。
-
-#### 1. 启动 GDB 并连接
-
-```gdb
-$ make gdb
-riscv64-unknown-elf-gdb \
-    -ex 'file bin/kernel' \
-    -ex 'set arch riscv:rv64' \
-    -ex 'target remote localhost:1234'
-GNU gdb (SiFive GDB-Metal 10.1.0-2020.12.7) 10.1
-...
-Reading symbols from bin/kernel...
-The target architecture is set to "riscv:rv64".
-Remote debugging using localhost:1234
-0x0000000000001000 in ?? ()
-(gdb)
-```
-
-#### 2. 在内核 syscall 处设置断点并观察
-
+在 **Terminal 2** 中执行：
 ```gdb
 (gdb) break syscall
-Breakpoint 1 at 0xffffffffc02051ce: file kern/syscall/syscall.c, line 85.
 (gdb) continue
-Continuing.
+```
+程序将停在 `kern/syscall/syscall.c` 的 `syscall()` 函数入口。
 
+**观察结果（Terminal 2）**：
+```gdb
 Breakpoint 1, syscall () at kern/syscall/syscall.c:85
 85          struct trapframe *tf = current->tf;
 ```
-
-**查看此时的调用栈：**
-
-```gdb
+**分析**：此时 CPU 已处于内核态（S-mode）。通过 `bt` 命令可以看到调用栈：
+```
 (gdb) bt
 #0  syscall () at kern/syscall/syscall.c:85
-#1  0xffffffffc0200e10 in exception_handler (tf=0xffffffffc04b0d80) at kern/trap/trap.c:185
-#2  0xffffffffc0200e58 in trap_dispatch (tf=<optimized out>) at kern/trap/trap.c:253
+#1  0xffffffffc0200e10 in exception_handler (tf=0xffffffffc04b0d80)
+    at kern/trap/trap.c:185
+#2  0xffffffffc0200e58 in trap_dispatch (tf=<optimized out>)
+    at kern/trap/trap.c:253
 #3  trap (tf=<optimized out>) at kern/trap/trap.c:277
 #4  0xffffffffc0200f24 in __alltraps () at kern/trap/trapentry.S:126
 Backtrace stopped: frame did not save the PC
 ```
 
+`syscall` <- `exception_handler` <- `trap_dispatch` <- `trap` <- `__alltraps`。这验证了系统调用是通过异常机制（Trap）进入内核的。
 
-这段调用栈从上到下反映了内核处理来自用户态的异常/系统调用时，各层次函数的执行顺序与职责：
+#### 2. 观察用户态 ecall 陷入内核
 
-- #4 `__alltraps`：异常/中断入口（汇编，位于 `trapentry.S`），执行ebreak触发断点异常后，CPU 跳转到 `stvec` 后首先到达此处；此处负责最底层的寄存器保存和内核栈切换。
-- #3 `trap`：汇总处理入口（`trap.c`），负责把寄存器保存到 `trapframe` 并调用分发逻辑。
-- #2 `trap_dispatch`：根据 `scause`/`stval` 判断 trap 类型（中断/异常/系统调用），并调用相应的处理函数。
-- #1 `exception_handler`：对具体异常（如 `ebreak`/`ecall`）进行额外处理，例如 `ebreak` (a7=10) 的转发逻辑。
-- #0 `syscall`：系统调用分发点，从 `trapframe` 中读取系统调用号并调用相应的实现（如 `do_fork`、`do_exit` 等）。
+为了观察 `ecall` 指令的具体行为，我们需要在 Trap 入口处拦截。
 
-> 注：`Backtrace stopped: frame did not save the PC` 通常是因为汇编入口（如 `__alltraps`）没有按 GDB 期望的帧布局保存返回地址，导致 GDB 无法继续回溯；这并不影响我们理解从用户态到内核态处理流程的顺序与语义。
-
-系统阶段说明：此时 CPU 已进入内核态（S-mode），正在执行中断/异常入口的处理逻辑。准确的说，是在处理 `ebreak` 触发的断点异常（`scause=3`），来源于usermain -> kernel_execve() 中的 `ebreak` 指令。
-
-**查看 CSR 寄存器状态：**
-
+在 **Terminal 2** 中执行：
 ```gdb
-(gdb) info reg pc sp sepc scause stval sstatus
-pc             0xffffffffc02051ce       0xffffffffc02051ce <syscall>
-sp             0xffffffffc04b0d50       0xffffffffc04b0d50
-sepc           0xffffffffc0203ef2       -1071628558
-scause         0x3      3
-stval          0x0      0
-sstatus        0x8000000000046120       -9223372036854488800
-```
-
-> **分析**：此时 `scause=3` 表示断点异常（ebreak），这是因为内核通过 `kernel_execve` 使用 ebreak+a7=10 的方式触发系统调用。
-
-删除断点1：
-```gdb
-(gdb) delete 1
-```
-#### 3. 观察用户态 ecall 陷入内核
-
-在 `__alltraps` 处设置断点，然后继续执行：
-
-```gdb
-(gdb) break __alltraps
-Breakpoint 2 at 0xffffffffc0200eb4: file kern/trap/trapentry.S, line 123.
+(gdb) delete 1          # 删除之前的断点
+(gdb) break __alltraps  # 在 trapentry.S 的入口处下断点
 (gdb) continue
-Continuing.
+```
 
+**观察结果（Terminal 2）**：
+```gdb
 Breakpoint 2, __alltraps () at kern/trap/trapentry.S:123
 123         SAVE_ALL
 ```
-
-**查看从用户态 ecall 进入时的关键寄存器：**
-
+查看关键寄存器：
 ```gdb
-(gdb) info reg pc sepc scause stval sstatus
-pc             0xffffffffc0200eb4       0xffffffffc0200eb4 <__alltraps>
-sepc           0x800104 8388868
-scause         0x8      8
-stval          0x0      0
-sstatus        0x8000000000046020       -9223372036854489056
+(gdb) info reg scause sepc
+scause         0x8      8   (CAUSE_USER_ECALL)
+sepc           0x800104     (用户态 ecall 指令地址)
 ```
+**分析**：`scause=8` 表明这是用户态环境调用（User Ecall）。`sepc` 记录了触发异常的用户指令地址。
 
-> **关键发现**：
-> - `scause = 0x8` = 8，对应 `CAUSE_USER_ECALL`（用户态环境调用）
-> - `sepc = 0x800104`，这是用户态触发 ecall 的指令地址
-> - `pc` 已跳转到 `0xffffffffc0200eb4`（`__alltraps` 入口），与 `stvec` 设置一致
+#### 3. 定位并单步执行用户态 ecall
 
-系统阶段说明：当用户执行 `ecall` 时，硬件已将返回地址保存到 `sepc`、将 `scause` 设为 `CAUSE_USER_ECALL`，并跳转到 `stvec` 指向的 trap 入口（`__alltraps`）。随后 `trapentry.S` 完成低级寄存器保存与内核栈切换，并调用 `trap()`/`trap_dispatch` 来识别并调用 `syscall()` 等具体处理函数；此时操作系统处于内核态，代表用户执行系统调用服务。
+为了亲眼目睹从 User 到 Kernel 的跳变，我们直接在用户态指令处下断点。
 
-**查看用户态传入的系统调用参数：**
-
+在 **Terminal 2** 中执行：
 ```gdb
-(gdb) info reg a0 a1 a2 a3 a4 a5
-a0             0x1e     30
-a1             0x49     73
-a2             0x8009c8 8391112
-a3             0x7fffff98       2147483544
-a4             0x0      0
-a5             0x0      0
-```
-
-> 其中 `a0 = 0x1e = 30` 是系统调用号（`SYS_putc`，用于输出字符）。
-
-#### 4. 定位用户态 ecall 指令并单步执行
-
-直接在用户态 ecall 指令地址设置断点：
-
-```gdb
-(gdb) break *0x800104
-Breakpoint 5 at 0x800104
+(gdb) break *0x800104   # 在 sepc 指向的地址（ecall）下断点
 (gdb) continue
+```
+
+**观察结果（Terminal 2）**：
+```gdb
+(gdb) c
 Continuing.
 
-Breakpoint 5, 0x0000000000800104 in ?? ()
+Breakpoint 3, 0x0000000000800104 in syscall (num=num@entry=30)
+    at user/libs/syscall.c:23
+23          asm volatile (
+(gdb) x/i $pc
+=> 0x800104 <syscall+44>:       ecall
 ```
-
-**确认当前指令是 ecall：**
-
+此时 CPU 处于用户态（U-mode）。
+接下来，先删除断点2：
 ```gdb
-(gdb) x/3i $pc
-=> 0x800104:    ecall
-   0x800108:    sd      a0,28(sp)
-   0x80010c:    lw      a0,28(sp)
+(gdb) delete 2
 ```
 
-系统阶段说明：此刻 CPU 仍然在用户态（U-mode），即将执行 `ecall` 指令。执行 `si`（一步指令）会触发硬件陷入，保存 `sepc`/`scause` 并跳转到 `stvec`，进入内核的 trap 处理流程。
-
-**查看 ecall 执行前的用户态寄存器：**
-
-```gdb
-(gdb) info reg pc sp a0 a1 a2 a3
-pc             0x800104 0x800104
-sp             0x7ffffe50       0x7ffffe50
-a0             0x1e     30
-a1             0x61     97
-a2             0x8009c8 8391112
-a3             0x7fffff98       2147483544
-```
-
-暂时禁用断点2：
-```
-(gdb) disable 2
-```
-
-**单步执行 ecall，观察陷入内核：**
-
+执行单步指令 `si`：
 ```gdb
 (gdb) si
 0xffffffffc0200eb8 in __alltraps () at kern/trap/trapentry.S:123
 123         SAVE_ALL
 ```
+**分析**：执行 `ecall` 后，PC 瞬间从 `0x800104`（用户态）跳转到了 `0xffffffffc0200eb8`（内核 Trap 入口）。这证明了 `ecall` 指令触发了硬件的特权级切换和跳转。
 
-系统阶段说明：执行到 `__alltraps` 并执行 `SAVE_ALL` 表明硬件已进入内核 trap 入口并完成寄存器保存；内核现在有完整的 trapframe，可由 `trap()`/`trap_dispatch` 根据 `scause` 分发到 `syscall()` 或其它处理函数，整个处理过程都发生在内核态（S-mode）。
+#### 4. 观察 sret 返回用户态
 
-**立即查看陷入后的 CSR 状态：**
+系统调用处理完毕后，内核通过 `sret` 指令返回用户态。
 
+在 **Terminal 2** 中执行：
 ```gdb
-(gdb) info reg pc sepc scause stval sstatus stvec
-pc             0xffffffffc0200eb8       0xffffffffc0200eb8 <__alltraps+4>
-sepc           0x800104 8388868
-scause         0x8      8
-stval          0x0      0
-sstatus        0x8000000000046020       -9223372036854489056
-stvec          0xffffffffc0200eb4       -1071640908
-```
-
-> **核心验证**：
-> - `pc` 从用户态 `0x800104` 跳转到内核态 `0xffffffffc0200eb8`（`__alltraps` 入口附近）
-> - `sepc = 0x800104` 保存了触发 ecall 的用户态指令地址
-> - `scause = 8` 确认是用户态 ecall
-> - `stvec = 0xffffffffc0200eb4` 是异常向量表入口，与 `pc` 跳转目标一致
-
-#### 5. 观察 sret 返回用户态
-
-首先反汇编 `__trapret` 找到 sret 指令位置：
-
-```gdb
-(gdb) disassemble __trapret
-Dump of assembler code for function __trapret:
-   0xffffffffc0200f24 <+0>:     ld      s1,256(sp)
-   0xffffffffc0200f26 <+2>:     ld      s2,264(sp)
-   ...
-   0xffffffffc0200f78 <+84>:    ld      sp,16(sp)
-   0xffffffffc0200f7a <+86>:    sret
-End of assembler dump.
-```
-
-**在 sret 指令处设置断点：**
-
-```gdb
-(gdb) break *0xffffffffc0200f7a
-Breakpoint 4 at 0xffffffffc0200f7a: file kern/trap/trapentry.S, line 133.
+(gdb) break kern/trap/trapentry.S:133
 (gdb) continue
-Continuing.
-
-Breakpoint 4, __trapret () at kern/trap/trapentry.S:133
-133         sret
 ```
 
-**查看 sret 执行前的状态：**
-
+**观察结果（Terminal 2）**：
+停在 `sret` 指令处。查看状态：
 ```gdb
-(gdb) info reg pc sepc scause sstatus sp a0
-pc             0xffffffffc0200f7a       0xffffffffc0200f7a <__trapret+86>
+(gdb) info reg sepc sstatus
 sepc           0x800108 8388872
-scause         0x8      8
 sstatus        0x8000000000046020       -9223372036854489056
-sp             0x7ffffe50       0x7ffffe50
-a0             0x0      0
 ```
-
-> **注意**：`sepc = 0x800108` 是 ecall 的下一条指令（`0x800104 + 4`），这是因为系统调用处理时会将 `sepc += 4`。
-
-系统阶段说明：到 `__trapret` 阶段，内核已完成系统调用的实际处理（返回值已写入 `trapframe`），并把 `sepc` 设置为用户下一条要执行的指令（可能已加 4）。`__trapret` 正在把保存的寄存器恢复到物理 CSR（如 `sstatus`/`sepc`），随后执行 `sret` 将使 CPU 从 S-mode 切换回 U-mode，并从 `sepc` 指向的地址恢复执行用户程序。
-
-**单步执行 sret，观察返回用户态：**
-
+执行 `si`：
 ```gdb
 (gdb) si
-0x0000000000800108 in ?? ()
+(gdb) si
+0x0000000000800108 in syscall (num=0, num@entry=30)
+    at user/libs/syscall.c:23
+23          asm volatile (
+```
+**分析**：执行 `sret` 后，PC 恢复为 `sepc` 的值（`0x800108`），CPU 切回用户态，继续执行用户程序的下一条指令。
+
+### 第二阶段：从模拟器视角观察（Host GDB）
+
+本阶段引入 **Terminal 3**，观察 QEMU 模拟器是如何“模拟”上述 `ecall` 和 `sret` 指令的。
+
+**注意：不需要重启 Terminal 1 和 Terminal 2。** 我们直接在第一阶段的调试基础上继续进行。此时 Terminal 1 的 QEMU 进程仍在运行（或暂停中），Terminal 2 的 Guest GDB 保持连接状态。
+
+**（如果遇到 QEMU 意外退出或断点无法命中，建议完全重启三个终端的调试会话，并严格按照下述顺序操作）**
+
+#### 1. 连接 QEMU 进程
+
+在 **Terminal 3** 中执行：
+```bash
+# 查找 qemu-system-riscv64 的 PID
+ps aux | grep qemu
+# 启动主机 GDB 并 attach
+gdb -p <qemu-pid>
 ```
 
-**查看 sret 执行后的状态：**
+**注意**：由于我们在 Terminal 1 中使用了带有符号的 QEMU 二进制文件，Host GDB 会自动加载符号表，**不需要**再手动执行 `symbol-file` 命令。
 
+#### 2. 在 QEMU 源码中设置断点
+
+我们需要拦截 QEMU 处理 RISC-V `ecall` 指令的函数。
+
+在 **Terminal 3 (Host GDB)** 中执行：
 ```gdb
-(gdb) info reg pc sepc scause sstatus sp a0
-pc             0x800108 0x800108
-sepc           Could not fetch register "sepc"; remote failure reply 'E14'
-scause         Could not fetch register "scause"; remote failure reply 'E14'
-sstatus        Could not fetch register "sstatus"; remote failure reply 'E14'
-sp             0x7ffffe50       0x7ffffe50
-a0             0x0      0
-```
-
-> **关键验证**：
-> - `pc` 从内核态 `0xffffffffc0200f7a` 跳转到用户态 `0x800108`
-> - `pc == 原sepc`，验证了 sret 会将 PC 设置为 sepc 的值
-> - CSR 寄存器（sepc/scause/sstatus）在用户态无法读取（返回 E14 错误），这正好证明已经切换到了 U-mode（用户态无权访问 S-mode CSR）
-> - `a0 = 0` 是系统调用的返回值
-
-**查看用户态继续执行的指令：**
-
-```gdb
-(gdb) x/5i $pc
-=> 0x800108:    sd      a0,28(sp)
-   0x80010c:    lw      a0,28(sp)
-   0x80010e:    addi    sp,sp,144
-   0x800110:    ret
-   0x800112:    mv      a1,a0
-```
-
-#### 6. 观察 do_fork 系统调用
-
-禁用断点4和3：
-```
-(gdb) disable 4
-(gdb) disable 3
-```
-
-```gdb
-(gdb) break do_fork
-Breakpoint 5 at 0xffffffffc0203ffe: file kern/process/proc.c, line 442.
+(gdb) break helper_raise_exception
+Breakpoint 1 at 0x5e02c068b9d1: file /root/build/qemu-4.1.1/target/riscv/op_helper.c, line 39.
+(gdb) break riscv_cpu_do_interrupt
+Breakpoint 2 at 0x5e02c068d5e9: file /root/build/qemu-4.1.1/target/riscv/cpu_helper.c, line 507.
+(gdb) break riscv_raise_exception
+Breakpoint 3 at 0x5e02c068b959: file /root/build/qemu-4.1.1/target/riscv/op_helper.c, line 31.
 (gdb) continue
-Continuing.
-
-Breakpoint 5, do_fork (clone_flags=0, stack=2147483456, tf=0xffffffffc04b0ee0) 
-    at kern/process/proc.c:442
-442         if (nr_process >= MAX_PROCESS)
 ```
 
-**查看 do_fork 的调用栈：**
+#### 3. 触发拦截
 
+首先在终端2中删除断点：
+
+```gdb
+delete 3
+delete 4
+```
+
+
+回到 **Terminal 2 (Guest GDB)**，让 ucore 继续运行（触发下一次系统调用）：
+```gdb
+(gdb) continue
+```
+
+**如果 Terminal 1 显示 `initproc exit` 且 QEMU 退出：**
+这说明程序执行速度过快，在 Host GDB 断点生效前就已经完成了所有系统调用。
+**解决方法**：请完全重启实验。
+1. 关闭所有终端。
+2. **Terminal 1**：重新执行 `make debug QEMU=/root/build/qemu-4.1.1/riscv64-softmmu/qemu-system-riscv64`。
+3. **Terminal 2**：重新执行 `make gdb`。
+4. **Terminal 3**：重新 attach 并设置断点。
+5. 最后在 **Terminal 2** 执行 `continue`。
+
+**观察结果（Terminal 3）**：
+Host GDB 会命中断点，暂停 QEMU 的执行。
+```gdb
+(gdb) c
+Continuing.
+[Switching to Thread 0x7163599fe640 (LWP 230988)]
+
+Thread 3 "qemu-system-ris" hit Breakpoint 1, helper_raise_exception (env=0x5e02c1cc92a0, exception=8) at /root/build/qemu-4.1.1/target/riscv/op_helper.c:39
+39          riscv_raise_exception(env, exception, 0);
+```
+**分析**：
+此时 **Terminal 1** (QEMU) 界面冻结，**Terminal 2** (Guest GDB) 也会阻塞等待。
+在 **Terminal 3** 中查看调用栈 (`bt`)，可以看到 QEMU 的 TCG 引擎（`tcg_cpu_exec`, `cpu_exec`）调用了 RISC-V 的异常处理逻辑。
 ```gdb
 (gdb) bt
-#0  do_fork (clone_flags=0, stack=2147483456, tf=0xffffffffc04b0ee0) at kern/process/proc.c:442
-#1  0xffffffffc0205218 in syscall () at kern/syscall/syscall.c:97
-#2  0xffffffffc0200e58 in trap_dispatch (tf=<optimized out>) at kern/trap/trap.c:253
-#3  trap (tf=<optimized out>) at kern/trap/trap.c:277
-#4  0xffffffffc0200f24 in __alltraps () at kern/trap/trapentry.S:126
-Backtrace stopped: frame did not save the PC
+#0  helper_raise_exception (env=0x5e02c1cc92a0, 
+    exception=8)
+    at /root/build/qemu-4.1.1/target/riscv/op_helper.c:39
+#1  0x0000716359a51fbf in code_gen_buffer ()
+#2  0x00005e02c05f82fb in cpu_tb_exec (
+    cpu=0x5e02c1cc0890, 
+    itb=0x716359a51ec0 <code_gen_buffer+339603>)
+    at /root/build/qemu-4.1.1/accel/tcg/cpu-exec.c:173
+#3  0x00005e02c05f9141 in cpu_loop_exec_tb (
+    cpu=0x5e02c1cc0890, 
+    tb=0x716359a51ec0 <code_gen_buffer+339603>, 
+    last_tb=0x7163599fd918, 
+    tb_exit=0x7163599fd910)
+    at /root/build/qemu-4.1.1/accel/tcg/cpu-exec.c:621
+#4  0x00005e02c05f9476 in cpu_exec (
+    cpu=0x5e02c1cc0890)
+    at /root/build/qemu-4.1.1/accel/tcg/cpu-exec.c:732
+--Type <RET> for more, q to quit, c to continue without paging--
+#5  0x00005e02c05abad6 in tcg_cpu_exec (
+    cpu=0x5e02c1cc0890)
+    at /root/build/qemu-4.1.1/cpus.c:1435
+#6  0x00005e02c05ac38f in qemu_tcg_cpu_thread_fn
+    (arg=0x5e02c1cc0890)
+    at /root/build/qemu-4.1.1/cpus.c:1743
+#7  0x00005e02c0a2e457 in qemu_thread_start (
+    args=0x5e02c1cd6f30)
+    at util/qemu-thread-posix.c:502
+#8  0x000071635c294ac3 in start_thread (
+    arg=<optimized out>)
+    at ./nptl/pthread_create.c:442
+#9  0x000071635c3268c0 in clone3 ()
+    at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:81
 ```
 
-**查看传入参数：**
+这揭示了“虚拟机”的本质：Guest 的一条 `ecall` 指令，在 Host 侧对应着一系列复杂的 C 函数调用，用于更新虚拟 CPU 的状态（如 `scause`, `sepc`, `pc` 等）。
 
-```gdb
-(gdb) info args
-clone_flags = 0
-stack = 2147483456
-tf = 0xffffffffc04b0ee0
-```
+#### 4. 恢复执行
 
-系统阶段说明：当执行 `do_fork` 时，内核正在创建子进程：分配并初始化子进程的 PCB 与内核栈，复制或设置子进程的内存空间（调用 `copy_mm` / `dup_mmap` / `copy_range`），并设置好子进程的 `trapframe`（保证子进程在返回用户态时能正确运行）。创建完成后，子进程通常被设置为 `RUNNABLE` 并由调度器调度执行。
-#### 7. 观察 do_exit 系统调用
-
-```gdb
-(gdb) break do_exit
-Breakpoint 7 at 0xffffffffc0204428: file kern/process/proc.c, line 527.
-(gdb) continue
-Continuing.
-
-Breakpoint 7, do_exit (error_code=-66436) at kern/process/proc.c:527
-527         if (current == idleproc)
-```
-
-**查看调用栈和当前进程信息：**
-
-```gdb
-(gdb) bt
-#0  do_exit (error_code=-66436) at kern/process/proc.c:527
-#1  0xffffffffc0205218 in syscall () at kern/syscall/syscall.c:97
-#2  0xffffffffc0200e58 in trap_dispatch (tf=<optimized out>) at kern/trap/trap.c:253
-#3  trap (tf=<optimized out>) at kern/trap/trap.c:277
-#4  0xffffffffc0200f24 in __alltraps () at kern/trap/trapentry.S:126
-Backtrace stopped: frame did not save the PC
-
-(gdb) print current->pid
-$1 = 3
-(gdb) print current->parent->pid
-$3 = 2
-```
-
-系统阶段说明：在 `do_exit` 中，进程正在走退出路径：内核会释放其用户内存（`exit_mmap`、`put_pgdir` 等）、记录退出码并将进程状态设为 `PROC_ZOMBIE`，然后唤醒父进程（如果父进程在等待）。退出后内核会调用 `schedule()` 切换到其它进程；该进程不再执行用户态代码。
-
-> **分析**：当前退出的是 PID=3 的进程，其父进程是 PID=2（即 user_main 进程）。
+在 **Terminal 3** 中执行删除所有断点并执行 `continue`，QEMU 恢复运行，**Terminal 2** 重新获得控制权。
 
 ### 调试结果总结
 
-| 观察点 | 预期结果 | 实际观察 | 验证状态 |
-|--------|----------|----------|----------|
-| ecall 触发后 scause | 8 (CAUSE_USER_ECALL) | `scause = 0x8` | ✅ |
-| ecall 触发后 sepc | 用户态 ecall 地址 | `sepc = 0x800104` | ✅ |
-| ecall 触发后 pc | 跳转到 stvec | `pc = 0xffffffffc0200eb8` | ✅ |
-| sret 执行后 pc | 跳转到 sepc | `pc = 0x800108` (sepc+4) | ✅ |
-| sret 后 CSR 不可访问 | 用户态无权访问 S-mode CSR | 返回 E14 错误 | ✅ |
-| fork 调用栈 | syscall → do_fork | 完整调用链可见 | ✅ |
-| exit 进程关系 | 子进程 → 父进程 | PID=3, parent PID=2 | ✅ |
-
----
-
-### 调试 ecall：只用“客体 GDB”也能验证关键机制（推荐）
-
-#### 1. 在用户态 `syscall()` 处设置断点
-
-```gdb
-(gdb) break syscall
-(gdb) continue
-```
-
-#### 2. 单步执行到 `ecall` 指令
-
-使用`si`（step instruction）单步执行汇编指令，并使用`x/7i $pc`查看接下来的指令：
-
-```gdb
-(gdb) si
-1: x/7i $pc
-=> 0x800104 <syscall+44>:       ecall
-   0x800108 <syscall+48>:       sd      a0,28(sp)
-   0x80010c <syscall+52>:       lw      a0,28(sp)
-   ...
-```
-
-此时可以顺便确认寄存器约定是否符合本仓库实现：
-
-- 系统调用号在 `a0`
-- 参数在 `a1`~`a5`
-- 返回值最终写回 `a0`
-
-```gdb
-(gdb) info reg a0 a1 a2 a3 a4 a5
-```
-
-#### 3. 观察陷入内核后的入口与 CSR（可复现证据）
-
-在同一个 GDB（连接 `target remote localhost:1234`）里，给内核入口下断点即可观察“ecall 之后 CPU 跳到了哪里”。
-
-```gdb
-(gdb) break __alltraps
-(gdb) continue
-```
-
-命中后重点看：
-
-```gdb
-(gdb) info reg pc sp sepc scause stval sstatus stvec
-```
-
-你应该能看到：
-
-- `scause` 对应用户态 ecall（`CAUSE_USER_ECALL`）
-- `sepc` 指向触发 ecall 的那条指令地址
-- `pc` 已经跳到 `stvec` 指定的异常入口（也就是 `__alltraps` 附近）
-
-### 调试 sret：观察返回用户态前后的 PC/特权级相关位
-
-#### 1. 在返回用户态前设置断点
-
-系统调用处理完成后，会通过`__trapret`返回用户态。在`sret`指令前设置断点：
-
-```gdb
-(ucore GDB)
-(gdb) break *__trapret  # 或者 kern/trap/trapentry.S 中sret的位置
-(gdb) continue
-
-```
-
-接下来用 `si` 单步执行到 `sret` 前后，对比 `pc/sepc/sstatus`：
-
-```gdb
-(gdb) x/5i $pc
-(gdb) info reg sepc sstatus
-(gdb) si   # 执行 sret
-(gdb) info reg pc sstatus
-```
-
-如果返回用户态，预期现象是：
-
-- `pc` 跳到 `sepc`（用户态下一条要执行的指令）
-- `sstatus.SPP` 对应“返回到 U-mode”（本仓库在 `load_icode` 中确保 SPP 清零）
-- `sstatus.SIE` 在返回后会根据 `SPIE` 被恢复
-
-### （可选）在 QEMU 侧做第二重调试：调试“模拟器如何处理 ecall/sret”
-
-这一部分只在你**有带调试符号的 QEMU**（或自行编译了 `--enable-debug` 且未 strip）时才可复现：否则 host 侧 GDB 往往无法按函数名下断点。
-
-思路是：
-
-1. 仍然用 `make debug` 启动 QEMU（客体 CPU 在 `-S` 下暂停）。
-2. 再开一个 host 侧 GDB，attach 到 QEMU 进程（这是“第二重 GDB”）。
-3. 在 QEMU 的 RISC-V 异常入口/特权指令 helper 处下断点（函数名随 QEMU 版本变化，可用 `info functions riscv` 辅助查找）。
-4. 在客体 GDB 中执行到 `ecall/sret`，host GDB 即可捕捉到 QEMU 内部的处理。
-
-为了避免“不同版本 QEMU 的内部实现差异”导致报告不可复现，本报告不再粘贴 QEMU 内部伪源码，而是以“可观察到的现象（CSR/PC/调用栈）”作为证据。
-
-在 host 侧你通常能看到 QEMU 走到 TCG/翻译块执行路径（如 `cpu_exec`/`tb_gen_code`/`tcg_gen_code` 等），并在遇到特权指令或异常时调用 RISC-V 相关 helper。
+| 观察视角 | 终端 | 操作 | 观察到的现象 | 结论 |
+| :--- | :--- | :--- | :--- | :--- |
+| **内核视角** | Terminal 2 | 单步 `ecall` | PC 从 `0x800...` 跳变到 `0xffff...` | 硬件（模拟器）完成了特权级切换和跳转 |
+| **内核视角** | Terminal 2 | 查看 `scause` | 值变为 8 | 硬件正确识别了异常类型 |
+| **模拟器视角** | Terminal 3 | 断点 `do_interrupt` | Host GDB 捕获到函数调用 | Guest 的硬件行为实为 Host 的软件模拟 |
 
 ---
 
