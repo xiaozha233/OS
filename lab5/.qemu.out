@@ -32,8 +32,8 @@ DTB init completed
 Special kernel symbols:
   entry  0xc020004a (virtual)
   etext  0xc020571e (virtual)
-  edata  0xc02a62b8 (virtual)
-  end    0xc02aa75c (virtual)
+  edata  0xc02a6260 (virtual)
+  end    0xc02aa704 (virtual)
 Kernel executable memory footprint: 682KB
 memory management: default_pmm_manager
 physcial memory map:
@@ -84,6 +84,6 @@ I am child 0
 forktest pass.
 all user-mode processes have quit.
 init check memory pass.
-kernel panic at kern/process/proc.c:527:
+kernel panic at kern/process/proc.c:533:
     initproc exit.
 
