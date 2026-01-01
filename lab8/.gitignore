@@ -1,0 +1,10 @@
+# Build artifacts
+obj/
+bin/
+disk0/
+
+# Disk images
+*.img
+
+# Editor config
+.vscode/

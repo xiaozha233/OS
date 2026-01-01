@@ -327,11 +327,13 @@ if (blkoff != 0) {
     alen += size;
     buf += size;
     
-    // 如果还有后续块，移动到下一块
-    if (nblks > 0) {
-        blkno++;
-        nblks--;
+    // 【关键】如果没有后续块，说明全部处理完毕，直接退出
+    // 避免情况3重复处理同一块
+    if (nblks == 0) {
+        goto out;
     }
+    blkno++;
+    nblks--;
 }
 ```
 
@@ -377,6 +379,7 @@ while (nblks > 0) {
 
 ```c
 // 情况3：最后一个块不对齐
+// 注意：如果第一块已经处理了全部内容（在情况1中 goto out），这里不会执行
 if (endpos % SFS_BLKSIZE != 0) {
     // 计算最后一块需要处理的大小
     size = endpos % SFS_BLKSIZE;
@@ -395,6 +398,8 @@ if (endpos % SFS_BLKSIZE != 0) {
     alen += size;
 }
 ```
+
+**重要提示**：情况1中的 `goto out` 是关键！当数据完全在一个块内时（nblks == 0），处理完情况1后必须直接跳到 out，否则情况3的条件 `endpos % SFS_BLKSIZE != 0` 可能也成立，导致重复处理同一块数据。
 
 ---
 
@@ -477,10 +482,12 @@ sfs_io_nolock(struct sfs_fs *sfs, struct sfs_inode *sin, void *buf,
         // 更新状态
         alen += size;
         buf += size;
-        if (nblks > 0) {
-            blkno++;
-            nblks--;
+        // 【关键】如果没有后续块，说明全部处理完毕，直接退出
+        if (nblks == 0) {
+            goto out;
         }
+        blkno++;
+        nblks--;
     }
     
     // 情况2：处理中间的完整块
@@ -503,6 +510,7 @@ sfs_io_nolock(struct sfs_fs *sfs, struct sfs_inode *sin, void *buf,
     }
     
     // 情况3：处理最后一个不对齐的块
+    // 注意：如果第一块已经处理了全部内容（在情况1中 goto out），这里不会执行
     if (endpos % SFS_BLKSIZE != 0) {
         // 计算最后块需要处理的大小
         size = endpos % SFS_BLKSIZE;

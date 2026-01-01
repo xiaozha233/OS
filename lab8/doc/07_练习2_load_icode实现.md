@@ -304,11 +304,20 @@ for (int i = 0; i < elf->e_phnum; i++) {
     }
     
     // 根据 p_flags 设置权限
-    uint32_t vm_flags = 0, perm = PTE_U;
-    if (ph->p_flags & ELF_PF_X) vm_flags |= VM_EXEC;
-    if (ph->p_flags & ELF_PF_W) vm_flags |= VM_WRITE;
-    if (ph->p_flags & ELF_PF_R) vm_flags |= VM_READ;
-    if (vm_flags & VM_WRITE) perm |= PTE_W;
+    // 【重要】在 RISC-V 中，必须同时设置 vm_flags 和对应的 PTE 权限位
+    uint32_t vm_flags = 0, perm = PTE_U;  // 用户态可访问
+    if (ph->p_flags & ELF_PF_X) {
+        vm_flags |= VM_EXEC;
+        perm |= PTE_X;  // 可执行
+    }
+    if (ph->p_flags & ELF_PF_W) {
+        vm_flags |= VM_WRITE;
+        perm |= PTE_W;  // 可写
+    }
+    if (ph->p_flags & ELF_PF_R) {
+        vm_flags |= VM_READ;
+        perm |= PTE_R;  // 可读
+    }
     
     // 创建 VMA
     if ((ret = mm_map(mm, ph->p_va, ph->p_memsz, vm_flags, NULL)) != 0) {
@@ -392,78 +401,96 @@ if ((ret = mm_map(mm, USTACKTOP - USTACKSIZE, USTACKSIZE, vm_flags, NULL)) != 0)
     goto bad_cleanup_mmap;
 }
 
-// 分配用户栈的物理页（这里分配 4 页作为初始栈）
-// 注意：ucore 使用按需分配，这里至少分配一页供 argc/argv 使用
+// 分配用户栈的物理页（分配 4 页作为初始栈，供 argc/argv 使用）
 assert(pgdir_alloc_page(mm->pgdir, USTACKTOP - PGSIZE, PTE_USER) != NULL);
+assert(pgdir_alloc_page(mm->pgdir, USTACKTOP - 2*PGSIZE, PTE_USER) != NULL);
+assert(pgdir_alloc_page(mm->pgdir, USTACKTOP - 3*PGSIZE, PTE_USER) != NULL);
+assert(pgdir_alloc_page(mm->pgdir, USTACKTOP - 4*PGSIZE, PTE_USER) != NULL);
 ```
 
-### 5.7 Step 5-6: 设置 argc/argv 到用户栈
-
-```c
-// 计算参数占用的总大小
-uintptr_t stacktop = USTACKTOP;
-
-// 将参数字符串复制到用户栈
-// 从栈顶向下复制每个参数字符串
-uintptr_t argv_strs[EXEC_MAX_ARG_NUM];
-for (int i = argc - 1; i >= 0; i--) {
-    size_t len = strlen(kargv[i]) + 1;  // 包含 '\0'
-    stacktop -= len;
-    
-    // 这里需要将字符串复制到用户空间
-    // 由于还没切换页表，需要使用内核态的虚拟地址
-    char *dest = (char *)(page2kva(get_page(mm->pgdir, stacktop, NULL)) 
-                          + (stacktop & 0xFFF));
-    strcpy(dest, kargv[i]);
-    argv_strs[i] = stacktop;  // 记录用户态地址
-}
-
-// 对齐到 8 字节边界
-stacktop = ROUNDDOWN(stacktop, 8);
-
-// 压入 argv[argc] = NULL
-stacktop -= sizeof(uintptr_t);
-// *(uintptr_t *)kernel_addr(stacktop) = 0;
-
-// 压入 argv 指针数组
-stacktop -= sizeof(uintptr_t) * argc;
-uintptr_t uargv = stacktop;
-for (int i = 0; i < argc; i++) {
-    // *(uintptr_t *)kernel_addr(stacktop + i * sizeof(uintptr_t)) = argv_strs[i];
-}
-
-// 压入 argc
-stacktop -= sizeof(uintptr_t);
-// *(uintptr_t *)kernel_addr(stacktop) = argc;
-```
-
-**注意**：上述代码是简化的逻辑示意，实际实现需要正确处理用户空间地址与内核地址的转换。
-
-### 5.8 Step 7: 更新进程状态和设置 trapframe
+### 5.7 Step 5: 更新进程状态并切换页表
 
 ```c
 // 更新进程的内存管理结构
 mm_count_inc(mm);
 current->mm = mm;
 current->pgdir = PADDR(mm->pgdir);
-lsatp(PADDR(mm->pgdir));
+lsatp(PADDR(mm->pgdir));  // 切换到新进程的页表
+```
 
-// 设置 trapframe
+### 5.8 Step 6: 设置 argc/argv 到用户栈
+
+**【关键技术点】**：切换页表后，我们需要通过 `page2kva` 获取用户虚拟地址对应的内核虚拟地址来写入数据。
+
+```c
+uintptr_t stacktop = USTACKTOP;
+
+// 首先将参数字符串复制到用户栈（从栈顶向下）
+uintptr_t argv_ptrs[EXEC_MAX_ARG_NUM];
+for (int i = argc - 1; i >= 0; i--) {
+    size_t len = strlen(kargv[i]) + 1;  // 包含 '\0'
+    stacktop -= len;
+    // 【关键】通过 page2kva 获取内核虚拟地址来写入
+    struct Page *page = get_page(mm->pgdir, stacktop, NULL);
+    uintptr_t kva = (uintptr_t)page2kva(page) + (stacktop & (PGSIZE - 1));
+    strcpy((char *)kva, kargv[i]);
+    argv_ptrs[i] = stacktop;  // 保存用户态虚拟地址
+}
+
+// 对齐到 8 字节边界
+stacktop = ROUNDDOWN(stacktop, sizeof(uintptr_t));
+
+// 压入 argv[argc] = NULL
+stacktop -= sizeof(uintptr_t);
+{
+    struct Page *page = get_page(mm->pgdir, stacktop, NULL);
+    uintptr_t kva = (uintptr_t)page2kva(page) + (stacktop & (PGSIZE - 1));
+    *(uintptr_t *)kva = 0;
+}
+
+// 压入 argv 指针数组（从后往前）
+for (int i = argc - 1; i >= 0; i--) {
+    stacktop -= sizeof(uintptr_t);
+    struct Page *page = get_page(mm->pgdir, stacktop, NULL);
+    uintptr_t kva = (uintptr_t)page2kva(page) + (stacktop & (PGSIZE - 1));
+    *(uintptr_t *)kva = argv_ptrs[i];
+}
+
+uintptr_t uargv = stacktop;
+
+// 压入 argc
+stacktop -= sizeof(uintptr_t);
+{
+    struct Page *page = get_page(mm->pgdir, stacktop, NULL);
+    uintptr_t kva = (uintptr_t)page2kva(page) + (stacktop & (PGSIZE - 1));
+    *(uintptr_t *)kva = argc;
+}
+```
+
+### 5.9 Step 7: 设置 trapframe
+
+```c
+// 设置 trapframe，准备返回用户态
 struct trapframe *tf = current->tf;
 memset(tf, 0, sizeof(struct trapframe));
 
-tf->gpr.sp = stacktop;        // 用户栈指针
+tf->gpr.sp = stacktop;         // 用户栈指针
+tf->gpr.a0 = argc;             // 第一个参数：argc
+tf->gpr.a1 = uargv;            // 第二个参数：argv 指针
 tf->epc = elf->e_entry;        // 程序入口点
-tf->status = sstatus_read();   // 读取当前 sstatus
-tf->status |= SSTATUS_SPP;     // 设置为 S 模式（但 sret 后会切到 U 模式）
-tf->status |= SSTATUS_SPIE;    // 使能中断
 
-// 如果你的实现需要通过寄存器传递 argc/argv：
-tf->gpr.a0 = argc;
-tf->gpr.a1 = uargv;
+// 设置 sstatus 寄存器
+// SSTATUS_SPIE: sret 后使能中断
+// ~SSTATUS_SPP: 清除 SPP 位，sret 后返回用户态 (U-mode)
+tf->status = (read_csr(sstatus) | SSTATUS_SPIE) & ~SSTATUS_SPP;
 ```
 
-### 5.9 Step 8: 关闭文件描述符
+**【重要说明】**：
+- `SSTATUS_SPP` 位决定 `sret` 返回到哪个特权级：0=U-mode，1=S-mode
+- 我们需要清除这一位（`& ~SSTATUS_SPP`）以确保返回用户态
+- `SSTATUS_SPIE` 使能 sret 后的中断
+
+### 5.10 Step 8: 关闭文件描述符
 
 ```c
 // 文件已加载完成，关闭文件
@@ -539,12 +566,21 @@ load_icode(int fd, int argc, char **kargv) {
         }
         
         // 设置权限
+        // 【关键】在 RISC-V 中，必须同时设置 PTE_X、PTE_R、PTE_W 位
         vm_flags = 0;
-        perm = PTE_U;
-        if (ph->p_flags & ELF_PF_X) vm_flags |= VM_EXEC;
-        if (ph->p_flags & ELF_PF_W) vm_flags |= VM_WRITE;
-        if (ph->p_flags & ELF_PF_R) vm_flags |= VM_READ;
-        if (vm_flags & VM_WRITE) perm |= PTE_W;
+        perm = PTE_U;  // 用户态可访问
+        if (ph->p_flags & ELF_PF_X) {
+            vm_flags |= VM_EXEC;
+            perm |= PTE_X;  // 可执行
+        }
+        if (ph->p_flags & ELF_PF_W) {
+            vm_flags |= VM_WRITE;
+            perm |= PTE_W;  // 可写
+        }
+        if (ph->p_flags & ELF_PF_R) {
+            vm_flags |= VM_READ;
+            perm |= PTE_R;  // 可读
+        }
         
         // 创建 VMA
         if ((ret = mm_map(mm, ph->p_va, ph->p_memsz, vm_flags, NULL)) != 0) {
@@ -620,38 +656,70 @@ load_icode(int fd, int argc, char **kargv) {
     assert(pgdir_alloc_page(mm->pgdir, USTACKTOP - 3*PGSIZE, PTE_USER) != NULL);
     assert(pgdir_alloc_page(mm->pgdir, USTACKTOP - 4*PGSIZE, PTE_USER) != NULL);
     
-    // ==================== Step 5: 设置 argc/argv ====================
-    // 计算用户栈顶
-    uintptr_t stacktop = USTACKTOP - argc * EXEC_MAX_ARG_LEN - sizeof(void *) * (argc + 1);
-    stacktop = ROUNDDOWN(stacktop, 8);
-    
-    // （简化版）将 argc、argv 放入栈中
-    // 具体实现需要将 kargv 中的字符串复制到用户栈
-    // 这里给出简化思路，具体实现参考答案
-    
-    // ==================== Step 6: 更新进程状态 ====================
+    // ==================== Step 5: 更新进程状态 ====================
     mm_count_inc(mm);
     current->mm = mm;
     current->pgdir = PADDR(mm->pgdir);
     lsatp(PADDR(mm->pgdir));
     
+    // ==================== Step 6: 设置 argc/argv 到用户栈 ====================
+    // 【关键技术点】使用 page2kva 获取内核虚拟地址来写入用户栈
+    uintptr_t stacktop = USTACKTOP;
+    
+    // 首先将参数字符串复制到用户栈（从栈顶向下）
+    uintptr_t argv_ptrs[EXEC_MAX_ARG_NUM];
+    for (int i = argc - 1; i >= 0; i--) {
+        size_t len = strlen(kargv[i]) + 1;  // 包含 '\0'
+        stacktop -= len;
+        struct Page *page = get_page(mm->pgdir, stacktop, NULL);
+        uintptr_t kva = (uintptr_t)page2kva(page) + (stacktop & (PGSIZE - 1));
+        strcpy((char *)kva, kargv[i]);
+        argv_ptrs[i] = stacktop;  // 保存用户态虚拟地址
+    }
+    
+    // 对齐到 8 字节边界
+    stacktop = ROUNDDOWN(stacktop, sizeof(uintptr_t));
+    
+    // 压入 argv[argc] = NULL
+    stacktop -= sizeof(uintptr_t);
+    {
+        struct Page *page = get_page(mm->pgdir, stacktop, NULL);
+        uintptr_t kva = (uintptr_t)page2kva(page) + (stacktop & (PGSIZE - 1));
+        *(uintptr_t *)kva = 0;
+    }
+    
+    // 压入 argv 指针数组（从后往前）
+    for (int i = argc - 1; i >= 0; i--) {
+        stacktop -= sizeof(uintptr_t);
+        struct Page *page = get_page(mm->pgdir, stacktop, NULL);
+        uintptr_t kva = (uintptr_t)page2kva(page) + (stacktop & (PGSIZE - 1));
+        *(uintptr_t *)kva = argv_ptrs[i];
+    }
+    
+    uintptr_t uargv = stacktop;
+    
+    // 压入 argc
+    stacktop -= sizeof(uintptr_t);
+    {
+        struct Page *page = get_page(mm->pgdir, stacktop, NULL);
+        uintptr_t kva = (uintptr_t)page2kva(page) + (stacktop & (PGSIZE - 1));
+        *(uintptr_t *)kva = argc;
+    }
+    
     // ==================== Step 7: 设置 trapframe ====================
     struct trapframe *tf = current->tf;
-    uintptr_t uargv = stacktop + sizeof(uintptr_t);  // argv 数组位置
     
     memset(tf, 0, sizeof(struct trapframe));
     tf->gpr.sp = stacktop;
     tf->gpr.a0 = argc;
     tf->gpr.a1 = uargv;
     tf->epc = elf->e_entry;
-    tf->status = (sstatus_read() | SSTATUS_SPIE) & ~SSTATUS_SPP;
+    tf->status = (read_csr(sstatus) | SSTATUS_SPIE) & ~SSTATUS_SPP;
     
     // ==================== Step 8: 关闭文件 ====================
     sysfile_close(fd);
     
     ret = 0;
-    
-out:
     return ret;
     
 bad_cleanup_mmap:
@@ -667,24 +735,118 @@ bad_mm:
 
 ---
 
-## 八、do_fork 中的修改 \[S09]
+## 八、alloc_proc 中的修改 \[S09]
 
-在 Lab8 中，`do_fork` 函数也需要处理文件系统相关的内容。查看 `proc.c` 中的 `do_fork` 函数，你会看到：
+在 Lab8 中，`alloc_proc` 函数需要初始化文件结构指针：
 
 ```c
-// 需要复制父进程的文件结构
-if (copy_files(clone_flags, proc) != 0) {
-    goto bad_fork_cleanup_kstack;
+static struct proc_struct *
+alloc_proc(void) {
+    struct proc_struct *proc = kmalloc(sizeof(struct proc_struct));
+    if (proc != NULL) {
+        // ... 其他初始化 ...
+        
+        // lab8 add: 初始化文件结构指针
+        proc->filesp = NULL;
+    }
+    return proc;
 }
 ```
 
-确保这行代码在正确的位置（在 `setup_kstack` 之后，在 `copy_mm` 之前）。
+---
+
+## 九、do_fork 中的修改 \[S09]
+
+在 Lab8 中，`do_fork` 函数需要处理文件系统相关的内容，复制父进程的文件描述符表：
+
+```c
+int do_fork(uint32_t clone_flags, uintptr_t stack, struct trapframe *tf) {
+    // 1. call alloc_proc to allocate a proc_struct
+    if ((proc = alloc_proc()) == NULL) {
+        goto fork_out;
+    }
+    
+    proc->parent = current;
+    assert(current->wait_state == 0);
+    
+    // 2. call setup_kstack to allocate a kernel stack for child process
+    if (setup_kstack(proc) != 0) {
+        goto bad_fork_cleanup_proc;
+    }
+    
+    // 【LAB8 关键】复制父进程的文件结构
+    if (copy_files(clone_flags, proc) != 0) {
+        goto bad_fork_cleanup_kstack;
+    }
+    
+    // 3. call copy_mm to dup OR share mm according clone_flag
+    if (copy_mm(clone_flags, proc) != 0) {
+        goto bad_fork_cleanup_fs;  // 注意错误处理标签
+    }
+    
+    // 4. call copy_thread to setup tf & context in proc_struct
+    copy_thread(proc, stack, tf);
+    
+    // 5. insert proc_struct into hash_list && proc_list
+    bool intr_flag;
+    local_intr_save(intr_flag);
+    {
+        proc->pid = get_pid();
+        hash_proc(proc);
+        set_links(proc);
+    }
+    local_intr_restore(intr_flag);
+    
+    // 6. call wakeup_proc to make the new child process RUNNABLE
+    wakeup_proc(proc);
+    
+    // 7. set ret vaule using child proc's pid
+    ret = proc->pid;
+    
+fork_out:
+    return ret;
+
+bad_fork_cleanup_fs:  // LAB8 新增的错误处理
+    put_files(proc);
+bad_fork_cleanup_kstack:
+    put_kstack(proc);
+bad_fork_cleanup_proc:
+    kfree(proc);
+    goto fork_out;
+}
+```
 
 ---
 
-## 九、调试建议
+## 十、proc_run 的实现 \[S09]
 
-### 9.1 编译测试
+Lab8 还需要确保 `proc_run` 函数正确实现（继承自 Lab4/5）：
+
+```c
+void proc_run(struct proc_struct *proc) {
+    if (proc != current) {
+        bool intr_flag;
+        struct proc_struct *prev = current, *next = proc;
+        local_intr_save(intr_flag);
+        {
+            current = proc;
+            // 加载新进程的页目录表
+            lsatp(next->pgdir);
+            // 【LAB8 关键】刷新 TLB
+            flush_tlb();
+            // 进行上下文切换
+            switch_to(&(prev->context), &(next->context));
+        }
+        local_intr_restore(intr_flag);
+    }
+}
+```
+
+---
+
+## 十一、调试建议
+
+### 11.1 编译测试
 
 ```bash
 cd /home/albus_os/labcode/lab8
@@ -692,12 +854,14 @@ make clean
 make qemu
 ```
 
-### 9.2 预期输出
+### 11.2 预期输出
 
 ```
-sfs: mount: 'simple file system' (bindnode, binddevice): ok.
-vfs: binddevice: bindnode 'disk0'.
+sfs: mount: 'simple file system' (106/11/117)
+vfs: mount disk0.
+++ setup timer interrupts
 kernel_execve: pid = 2, name = "sh".
+user sh is running!!!
 $ ls
 badarg       faultread     hello        matrix       softint      waitkill
 badsegment   faultreadkernel  pgdir       priority    spin         yield
@@ -710,21 +874,22 @@ hello pass.
 $
 ```
 
-### 9.3 常见问题
+### 11.3 常见问题及解决方案
 
-| 问题 | 可能原因 |
-|-----|---------|
-| 启动后立即 panic | ELF 解析错误或段加载失败 |
-| 执行程序时 crash | argc/argv 设置错误 |
-| 程序无输出 | trapframe 设置错误，程序没有正确启动 |
-| 文件找不到 | 文件系统初始化问题 |
+| 问题 | 可能原因 | 解决方案 |
+|-----|---------|---------|
+| Instruction page fault | 权限设置错误，没有设置 PTE_X | 确保 perm 包含 PTE_X 和 PTE_R |
+| iobuf 断言失败 | sfs_io_nolock 实现有问题 | 检查 alen 计算和块边界处理 |
+| 程序无法启动 | proc_run 为空 | 实现 proc_run 函数 |
+| 进程无法创建 | do_fork 缺少 copy_files | 添加 copy_files 调用 |
+| 文件打不开 | filesp 未初始化 | 在 alloc_proc 中初始化 filesp = NULL |
 
 ---
 
-## 十、自测题 \[C15]
+## 十二、自测题 \[C15]
 
 **Q1（判断题）**：Lab8 的 `load_icode` 可以直接复用 Lab5 的代码，无需修改。
-> **答案**：❌ 错误。需要修改读取方式（使用 `load_icode_read` 从文件读取），并且需要处理 argc/argv 参数传递。
+> **答案**：❌ 错误。需要修改读取方式（使用 `load_icode_read` 从文件读取），并且需要处理 argc/argv 参数传递，以及正确设置 RISC-V 的 PTE 权限位。
 
 **Q2（单选题）**：在 RISC-V 中，main 函数的 argc 参数通过哪个寄存器传递？
 - A) a0
@@ -741,9 +906,12 @@ $
 > 3. 但运行时必须在内存中分配空间，并将其清零
 > 4. 这就是 `p_memsz > p_filesz` 的原因，差值就是 BSS 段大小
 
+**Q4（判断题）**：在 RISC-V 中，只设置 PTE_U 位就可以让用户程序执行代码。
+> **答案**：❌ 错误。还需要设置 PTE_X（可执行）和 PTE_R（可读）位。
+
 ---
 
-## 十一、下一步
+## 十三、下一步
 
 完成练习2后，请阅读：
 
@@ -751,4 +919,4 @@ $
 
 ---
 
-**Covered**: S09（练习2 load_icode 实现、argc/argv 处理）
+**Covered**: S09（练习2 load_icode 实现、argc/argv 处理、alloc_proc、do_fork、proc_run）
