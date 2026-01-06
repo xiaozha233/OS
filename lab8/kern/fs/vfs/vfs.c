@@ -7,91 +7,98 @@
 #include <kmalloc.h>
 #include <error.h>
 #include <proc.h>
-static semaphore_t bootfs_sem;
-static struct inode *bootfs_node = NULL;
+static semaphore_t bootfs_sem; // 启动文件系统信号量
+static struct inode *bootfs_node = NULL; // 启动文件系统inode
 
 extern void vfs_devlist_init(void);
 
 // __alloc_fs - allocate memory for fs, and set fs type
+// __alloc_fs - 为fs分配内存，并设置fs类型
 struct fs *
 __alloc_fs(int type) {
     struct fs *fs;
     if ((fs = kmalloc(sizeof(struct fs))) != NULL) {
-        fs->fs_type = type;
+        fs->fs_type = type; // 设置文件系统类型
     }
     return fs;
 }
 
 // vfs_init -  vfs initialize
+// vfs_init - vfs初始化
 void
 vfs_init(void) {
-    sem_init(&bootfs_sem, 1);
-    vfs_devlist_init();
+    sem_init(&bootfs_sem, 1); // 初始化信号量
+    vfs_devlist_init(); // 初始化设备列表
 }
 
 // lock_bootfs - lock  for bootfs
+// lock_bootfs - 为bootfs加锁
 static void
 lock_bootfs(void) {
     down(&bootfs_sem);
 }
 // ulock_bootfs - ulock for bootfs
+// unlock_bootfs - 为bootfs解锁
 static void
 unlock_bootfs(void) {
     up(&bootfs_sem);
 }
 
 // change_bootfs - set the new fs inode 
+// change_bootfs - 设置新的fs inode
 static void
 change_bootfs(struct inode *node) {
     struct inode *old;
-    lock_bootfs();
+    lock_bootfs(); // 加锁
     {
-        old = bootfs_node, bootfs_node = node;
+        old = bootfs_node, bootfs_node = node; // 更新bootfs_node
     }
-    unlock_bootfs();
+    unlock_bootfs(); // 解锁
     if (old != NULL) {
-        vop_ref_dec(old);
+        vop_ref_dec(old); // 减少旧inode的引用计数
     }
 }
 
 // vfs_set_bootfs - change the dir of file system
+// vfs_set_bootfs - 改变文件系统的目录
 int
 vfs_set_bootfs(char *fsname) {
     struct inode *node = NULL;
     if (fsname != NULL) {
         char *s;
-        if ((s = strchr(fsname, ':')) == NULL || s[1] != '\0') {
+        if ((s = strchr(fsname, ':')) == NULL || s[1] != '\0') { // 检查格式是否正确
             return -E_INVAL;
         }
         int ret;
-        if ((ret = vfs_chdir(fsname)) != 0) {
+        if ((ret = vfs_chdir(fsname)) != 0) { // 切换到指定目录
             return ret;
         }
-        if ((ret = vfs_get_curdir(&node)) != 0) {
+        if ((ret = vfs_get_curdir(&node)) != 0) { // 获取当前目录inode
             return ret;
         }
     }
-    change_bootfs(node);
+    change_bootfs(node); // 更改bootfs
     return 0;
 }
 
 // vfs_get_bootfs - get the inode of bootfs
+// vfs_get_bootfs - 获取bootfs的inode
 int
 vfs_get_bootfs(struct inode **node_store) {
     struct inode *node = NULL;
     if (bootfs_node != NULL) {
-        lock_bootfs();
+        lock_bootfs(); // 加锁
         {
             if ((node = bootfs_node) != NULL) {
-                vop_ref_inc(bootfs_node);
+                vop_ref_inc(bootfs_node); // 增加引用计数
             }
         }
-        unlock_bootfs();
+        unlock_bootfs(); // 解锁
     }
     if (node == NULL) {
-        return -E_NOENT;
+        return -E_NOENT; // 未找到
     }
-    *node_store = node;
+    *node_store = node; // 存储结果
     return 0;
 }
 

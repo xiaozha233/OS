@@ -15,6 +15,8 @@ struct bitmap {
 };
 
 // bitmap_create - allocate a new bitmap object.
+// 创建一个新的位图对象
+// 注意：在本实现中，位 1 表示空闲（可用），位 0 表示已占用
 struct bitmap *
 bitmap_create(uint32_t nbits) {
     static_assert(WORD_BITS != 0);
@@ -33,9 +35,11 @@ bitmap_create(uint32_t nbits) {
     }
 
     bitmap->nbits = nbits, bitmap->nwords = nwords;
+    // 初始化全为 1 (0xFF)，表示所有块都未被占用
     bitmap->map = memset(map, 0xFF, sizeof(WORD_TYPE) * nwords);
 
     /* mark any leftover bits at the end in use(0) */
+    // 处理末尾多余的位，将其标记为 0 (已占用/不可用)，防止被分配
     if (nbits != nwords * WORD_BITS) {
         uint32_t ix = nwords - 1, overbits = nbits - ix * WORD_BITS;
 
@@ -50,16 +54,19 @@ bitmap_create(uint32_t nbits) {
 }
 
 // bitmap_alloc - locate a cleared bit, set it, and return its index.
+// 分配一个空闲位（找 1，置 0）
 int
 bitmap_alloc(struct bitmap *bitmap, uint32_t *index_store) {
     WORD_TYPE *map = bitmap->map;
     uint32_t ix, offset, nwords = bitmap->nwords;
     for (ix = 0; ix < nwords; ix ++) {
+        // 如果该字不为 0，说明有空闲位
         if (map[ix] != 0) {
             for (offset = 0; offset < WORD_BITS; offset ++) {
                 WORD_TYPE mask = (1 << offset);
+                // 找到第一个为 1 的位
                 if (map[ix] & mask) {
-                    map[ix] ^= mask;
+                    map[ix] ^= mask; // 将其置 0 (表示已分配)
                     *index_store = ix * WORD_BITS + offset;
                     return 0;
                 }
@@ -71,6 +78,7 @@ bitmap_alloc(struct bitmap *bitmap, uint32_t *index_store) {
 }
 
 // bitmap_translate - according index, get the related word and mask
+// 辅助函数：计算索引对应的字地址和位掩码
 static void
 bitmap_translate(struct bitmap *bitmap, uint32_t index, WORD_TYPE **word, WORD_TYPE *mask) {
     assert(index < bitmap->nbits);
@@ -80,6 +88,7 @@ bitmap_translate(struct bitmap *bitmap, uint32_t index, WORD_TYPE **word, WORD_T
 }
 
 // bitmap_test - according index, get the related value (0 OR 1) in the bitmap
+// 测试某一位的值（1 表示空闲，0 表示已占用）
 bool
 bitmap_test(struct bitmap *bitmap, uint32_t index) {
     WORD_TYPE *word, mask;
@@ -88,15 +97,17 @@ bitmap_test(struct bitmap *bitmap, uint32_t index) {
 }
 
 // bitmap_free - according index, set related bit to 1
+// 释放某一位（置 1）
 void
 bitmap_free(struct bitmap *bitmap, uint32_t index) {
     WORD_TYPE *word, mask;
     bitmap_translate(bitmap, index, &word, &mask);
-    assert(!(*word & mask));
-    *word |= mask;
+    assert(!(*word & mask)); // 确保之前是 0 (已占用)
+    *word |= mask; // 置 1
 }
 
 // bitmap_destroy - free memory contains bitmap
+// 销毁位图
 void
 bitmap_destroy(struct bitmap *bitmap) {
     kfree(bitmap->map);
@@ -104,6 +115,7 @@ bitmap_destroy(struct bitmap *bitmap) {
 }
 
 // bitmap_getdata - return bitmap->map, return the length of bits to len_store
+// 获取位图数据指针和长度（用于同步到磁盘）
 void *
 bitmap_getdata(struct bitmap *bitmap, size_t *len_store) {
     if (len_store != NULL) {
