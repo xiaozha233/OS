@@ -1,3 +1,10 @@
+/*
+ * file.h 定义了文件描述符结构体（struct file）以及相关的操作函数。
+ * 在 ucore 中，每个进程都有一个文件描述符表，用于管理该进程打开的文件。
+ * struct file 记录了文件的打开状态、读写权限、当前偏移量以及指向 inode 的指针。
+ * 此文件还声明了内核层面的文件操作接口，如 file_open, file_read, file_write 等。
+ */
+
 #ifndef __KERN_FS_FILE_H__
 #define __KERN_FS_FILE_H__
 
@@ -14,13 +21,13 @@ struct dirent;
 struct file {
     enum {
         FD_NONE, FD_INIT, FD_OPENED, FD_CLOSED,
-    } status;
-    bool readable;
-    bool writable;
-    int fd;
-    off_t pos;
-    struct inode *node;
-    int open_count;
+    } status;                   // 文件状态
+    bool readable;              // 是否可读
+    bool writable;              // 是否可写
+    int fd;                     // 文件描述符
+    off_t pos;                  // 当前读写位置
+    struct inode *node;         // 指向的 inode
+    int open_count;             // 打开计数
 };
 
 void fd_array_init(struct file *fd_array);
