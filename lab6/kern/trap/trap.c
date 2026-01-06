@@ -19,12 +19,18 @@
 
 #define TICK_NUM 100
 
+static int debug_grade_tick_count = 0;
+
 static void print_ticks()
 {
     cprintf("%d ticks\n", TICK_NUM);
 #ifdef DEBUG_GRADE
-    cprintf("End of Test.\n");
-    panic("EOT: kernel seems ok.");
+    // 允许程序运行足够长的时间来完成 priority 测试（需要约 2000ms = 200+ ticks）
+    debug_grade_tick_count++;
+    if (debug_grade_tick_count >= 25) {  // 25 * 100 = 2500 ticks = 约 25 秒
+        cprintf("End of Test.\n");
+        panic("EOT: kernel seems ok.");
+    }
 #endif
 }
 
@@ -128,9 +134,16 @@ void interrupt_handler(struct trapframe *tf)
          *(3)当计数器加到100的时候，我们会输出一个`100ticks`表示我们触发了100次时钟中断，同时打印次数（num）加一
          * (4)判断打印次数，当打印次数为10时，调用<sbi.h>中的关机函数关机
          */
+        clock_set_next_event();
+        ticks++;
+        if (ticks % TICK_NUM == 0)
+        {
+            print_ticks();
+        }
 
         // lab6: YOUR CODE  (update LAB3 steps)
         //  在时钟中断时调用调度器的 sched_class_proc_tick 函数
+        sched_class_proc_tick(current);
 
         break;
     case IRQ_H_TIMER:
@@ -203,13 +216,23 @@ void exception_handler(struct trapframe *tf)
         cprintf("Environment call from M-mode\n");
         break;
     case CAUSE_FETCH_PAGE_FAULT:
-        cprintf("Instruction page fault\n");
+        cprintf("Instruction page fault at 0x%08lx, badaddr 0x%08lx\n", tf->epc, tf->tval);
+        if ((tf->status & SSTATUS_SPP) == 0) {
+            // 用户态 page fault，杀死进程
+            do_exit(-E_KILLED);
+        }
         break;
     case CAUSE_LOAD_PAGE_FAULT:
-        cprintf("Load page fault\n");
+        cprintf("Load page fault at 0x%08lx, badaddr 0x%08lx\n", tf->epc, tf->tval);
+        if ((tf->status & SSTATUS_SPP) == 0) {
+            do_exit(-E_KILLED);
+        }
         break;
     case CAUSE_STORE_PAGE_FAULT:
-        cprintf("Store/AMO page fault\n");
+        cprintf("Store/AMO page fault at 0x%08lx, badaddr 0x%08lx\n", tf->epc, tf->tval);
+        if ((tf->status & SSTATUS_SPP) == 0) {
+            do_exit(-E_KILLED);
+        }
         break;
     default:
         print_trapframe(tf);

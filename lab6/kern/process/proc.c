@@ -105,6 +105,18 @@ alloc_proc(void)
          *       uint32_t flags;                             // Process flag
          *       char name[PROC_NAME_LEN + 1];               // Process name
          */
+        proc->state = PROC_UNINIT;
+        proc->pid = -1;
+        proc->runs = 0;
+        proc->kstack = 0;
+        proc->need_resched = 0;
+        proc->parent = NULL;
+        proc->mm = NULL;
+        memset(&(proc->context), 0, sizeof(struct context));
+        proc->tf = NULL;
+        proc->pgdir = 0;
+        proc->flags = 0;
+        memset(proc->name, 0, PROC_NAME_LEN + 1);
 
         // LAB5:填写你在lab5中实现的代码 (update LAB4 steps)
         /*
@@ -112,6 +124,10 @@ alloc_proc(void)
          *       uint32_t wait_state;                        // waiting state
          *       struct proc_struct *cptr, *yptr, *optr;     // relations between processes
          */
+        proc->wait_state = 0;
+        proc->cptr = NULL;
+        proc->yptr = NULL;
+        proc->optr = NULL;
 
         // LAB6:YOUR CODE (update LAB5 steps)
         /*
@@ -123,6 +139,12 @@ alloc_proc(void)
          *       uint32_t lab6_stride;                       // stride value (lab6 stride)
          *       uint32_t lab6_priority;                     // priority value (lab6 stride)
          */
+        proc->rq = NULL;
+        list_init(&(proc->run_link));
+        proc->time_slice = 0;
+        skew_heap_init(&(proc->lab6_run_pool));
+        proc->lab6_stride = 0;
+        proc->lab6_priority = 0;
     }
     return proc;
 }
@@ -236,6 +258,15 @@ void proc_run(struct proc_struct *proc)
          *   lsatp():                   Modify the value of satp register
          *   switch_to():              Context switching between two processes
          */
+        bool intr_flag;
+        struct proc_struct *prev = current, *next = proc;
+        local_intr_save(intr_flag);
+        {
+            current = proc;
+            lsatp(next->pgdir);
+            switch_to(&(prev->context), &(next->context));
+        }
+        local_intr_restore(intr_flag);
     }
 }
 
@@ -452,6 +483,51 @@ int do_fork(uint32_t clone_flags, uintptr_t stack, struct trapframe *tf)
      *    update step 1: set child proc's parent to current process, make sure current process's wait_state is 0
      *    update step 5: insert proc_struct into hash_list && proc_list, set the relation links of process
      */
+
+    // 1. 分配进程控制块
+    if ((proc = alloc_proc()) == NULL)
+    {
+        goto fork_out;
+    }
+    // 设置父进程
+    proc->parent = current;
+    assert(current->wait_state == 0);
+
+    // 2. 分配内核栈
+    if (setup_kstack(proc) != 0)
+    {
+        goto bad_fork_cleanup_proc;
+    }
+
+    // 3. 复制或共享内存空间
+    if (copy_mm(clone_flags, proc) != 0)
+    {
+        goto bad_fork_cleanup_kstack;
+    }
+    // 如果是内核线程（mm == NULL），设置 pgdir 为 boot_pgdir_pa
+    if (proc->mm == NULL)
+    {
+        proc->pgdir = boot_pgdir_pa;
+    }
+
+    // 4. 设置 trapframe 和 context
+    copy_thread(proc, stack, tf);
+
+    // 5. 将进程插入 hash_list 和 proc_list，设置进程关系
+    bool intr_flag;
+    local_intr_save(intr_flag);
+    {
+        proc->pid = get_pid();
+        hash_proc(proc);
+        set_links(proc);
+    }
+    local_intr_restore(intr_flag);
+
+    // 6. 唤醒进程
+    wakeup_proc(proc);
+
+    // 7. 返回子进程的 pid
+    ret = proc->pid;
 
 fork_out:
     return ret;
@@ -688,6 +764,11 @@ load_icode(unsigned char *binary, size_t size)
      *          tf_eip should be the entry point of this binary program (elf->e_entry)
      *          tf_eflags should be set to enable computer to produce Interrupt
      */
+    // 设置用户模式的 trapframe (RISC-V)
+    tf->gpr.sp = USTACKTOP;           // 用户栈顶
+    tf->epc = elf->e_entry;           // 程序入口点
+    // 设置 sstatus：清除 SPP 位表示用户态，设置 SPIE 位允许中断
+    tf->status = (sstatus & ~SSTATUS_SPP) | SSTATUS_SPIE;
 
     ret = 0;
 out:
@@ -948,6 +1029,7 @@ void proc_init(void)
     idleproc->state = PROC_RUNNABLE;
     idleproc->kstack = (uintptr_t)bootstack;
     idleproc->need_resched = 1;
+    idleproc->pgdir = boot_pgdir_pa;  // 设置内核页目录
     set_proc_name(idleproc, "idle");
     nr_process++;
 
