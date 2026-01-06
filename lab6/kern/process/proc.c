@@ -83,10 +83,11 @@ void forkrets(struct trapframe *tf);
 void switch_to(struct context *from, struct context *to);
 
 // alloc_proc - alloc a proc_struct and init all fields of proc_struct
+// alloc_proc - 分配一个proc_struct并初始化所有字段
 static struct proc_struct *
 alloc_proc(void)
 {
-    struct proc_struct *proc = kmalloc(sizeof(struct proc_struct));
+    struct proc_struct *proc = kmalloc(sizeof(struct proc_struct)); // 分配内存
     if (proc != NULL)
     {
         // LAB4:填写你在lab4中实现的代码
@@ -105,18 +106,18 @@ alloc_proc(void)
          *       uint32_t flags;                             // Process flag
          *       char name[PROC_NAME_LEN + 1];               // Process name
          */
-        proc->state = PROC_UNINIT;
-        proc->pid = -1;
-        proc->runs = 0;
-        proc->kstack = 0;
-        proc->need_resched = 0;
-        proc->parent = NULL;
-        proc->mm = NULL;
-        memset(&(proc->context), 0, sizeof(struct context));
-        proc->tf = NULL;
-        proc->pgdir = 0;
-        proc->flags = 0;
-        memset(proc->name, 0, PROC_NAME_LEN + 1);
+        proc->state = PROC_UNINIT; // 设置初始状态为未初始化
+        proc->pid = -1; // 初始化 PID
+        proc->runs = 0; // 初始化运行次数
+        proc->kstack = 0; // 初始化内核栈
+        proc->need_resched = 0; // 初始化调度标志
+        proc->parent = NULL; // 初始化父进程
+        proc->mm = NULL; // 初始化内存描述符
+        memset(&(proc->context), 0, sizeof(struct context)); // 初始化上下文
+        proc->tf = NULL; // 初始化中断帧
+        proc->pgdir = 0; // 初始化页目录
+        proc->flags = 0; // 初始化标志
+        memset(proc->name, 0, PROC_NAME_LEN + 1); // 初始化进程名
 
         // LAB5:填写你在lab5中实现的代码 (update LAB4 steps)
         /*
@@ -124,10 +125,10 @@ alloc_proc(void)
          *       uint32_t wait_state;                        // waiting state
          *       struct proc_struct *cptr, *yptr, *optr;     // relations between processes
          */
-        proc->wait_state = 0;
-        proc->cptr = NULL;
-        proc->yptr = NULL;
-        proc->optr = NULL;
+        proc->wait_state = 0; // 初始化等待状态
+        proc->cptr = NULL; // 初始化子进程指针
+        proc->yptr = NULL; // 初始化更年轻的兄弟进程
+        proc->optr = NULL; // 初始化更老的兄弟进程
 
         // LAB6:YOUR CODE (update LAB5 steps)
         /*
@@ -139,72 +140,77 @@ alloc_proc(void)
          *       uint32_t lab6_stride;                       // stride value (lab6 stride)
          *       uint32_t lab6_priority;                     // priority value (lab6 stride)
          */
-        proc->rq = NULL;
-        list_init(&(proc->run_link));
-        proc->time_slice = 0;
-        skew_heap_init(&(proc->lab6_run_pool));
-        proc->lab6_stride = 0;
-        proc->lab6_priority = 0;
+        proc->rq = NULL; // 初始化运行队列
+        list_init(&(proc->run_link)); // 初始化运行队列链接
+        proc->time_slice = 0; // 初始化时间片
+        skew_heap_init(&(proc->lab6_run_pool)); // 初始化斜堆节点
+        proc->lab6_stride = 0; // 初始化步长
+        proc->lab6_priority = 0; // 初始化优先级
     }
     return proc;
 }
 
 // set_proc_name - set the name of proc
+// set_proc_name - 设置进程的名称
 char *
 set_proc_name(struct proc_struct *proc, const char *name)
 {
-    memset(proc->name, 0, sizeof(proc->name));
-    return memcpy(proc->name, name, PROC_NAME_LEN);
+    memset(proc->name, 0, sizeof(proc->name)); // 清空名称缓冲区
+    return memcpy(proc->name, name, PROC_NAME_LEN); // 复制名称
 }
 
 // get_proc_name - get the name of proc
+// get_proc_name - 获取进程的名称
 char *
 get_proc_name(struct proc_struct *proc)
 {
     static char name[PROC_NAME_LEN + 1];
-    memset(name, 0, sizeof(name));
-    return memcpy(name, proc->name, PROC_NAME_LEN);
+    memset(name, 0, sizeof(name)); // 清空名称缓冲区
+    return memcpy(name, proc->name, PROC_NAME_LEN); // 复制名称
 }
 
 // set_links - set the relation links of process
+// set_links - 设置进程的关系链接
 static void
 set_links(struct proc_struct *proc)
 {
-    list_add(&proc_list, &(proc->list_link));
-    proc->yptr = NULL;
-    if ((proc->optr = proc->parent->cptr) != NULL)
+    list_add(&proc_list, &(proc->list_link)); // 添加到进程列表
+    proc->yptr = NULL; // 没有更年轻的兄弟
+    if ((proc->optr = proc->parent->cptr) != NULL) // 如果有兄弟进程
     {
-        proc->optr->yptr = proc;
+        proc->optr->yptr = proc; // 更新兄弟进程的yptr
     }
-    proc->parent->cptr = proc;
-    nr_process++;
+    proc->parent->cptr = proc; // 设置父进程的子进程
+    nr_process++; // 增加进程计数
 }
 
 // remove_links - clean the relation links of process
+// remove_links - 清除进程的关系链接
 static void
 remove_links(struct proc_struct *proc)
 {
-    list_del(&(proc->list_link));
-    if (proc->optr != NULL)
+    list_del(&(proc->list_link)); // 从进程列表删除
+    if (proc->optr != NULL) // 如果有更老的兄弟
     {
-        proc->optr->yptr = proc->yptr;
+        proc->optr->yptr = proc->yptr; // 更新兄弟关系
     }
-    if (proc->yptr != NULL)
+    if (proc->yptr != NULL) // 如果有更年轻的兄弟
     {
-        proc->yptr->optr = proc->optr;
+        proc->yptr->optr = proc->optr; // 更新兄弟关系
     }
     else
     {
-        proc->parent->cptr = proc->optr;
+        proc->parent->cptr = proc->optr; // 更新父进程的子进程指针
     }
-    nr_process--;
+    nr_process--; // 减少进程计数
 }
 
 // get_pid - alloc a unique pid for process
+// get_pid - 为进程分配唯一的 PID
 static int
 get_pid(void)
 {
-    static_assert(MAX_PID > MAX_PROCESS);
+    static_assert(MAX_PID > MAX_PROCESS); // 确保 PID 数量足够
     struct proc_struct *proc;
     list_entry_t *list = &proc_list, *le;
     static int next_safe = MAX_PID, last_pid = MAX_PID;
@@ -245,6 +251,8 @@ get_pid(void)
 
 // proc_run - make process "proc" running on cpu
 // NOTE: before call switch_to, should load  base addr of "proc"'s new PDT
+// proc_run - 让进程 "proc" 在 CPU 上运行
+// 注意：在调用 switch_to 之前，应加载 "proc" 的新 PDT 基址
 void proc_run(struct proc_struct *proc)
 {
     if (proc != current)
@@ -260,26 +268,30 @@ void proc_run(struct proc_struct *proc)
          */
         bool intr_flag;
         struct proc_struct *prev = current, *next = proc;
-        local_intr_save(intr_flag);
+        local_intr_save(intr_flag); // 关中断
         {
-            current = proc;
-            lsatp(next->pgdir);
-            switch_to(&(prev->context), &(next->context));
+            current = proc; // 切换当前进程
+            lsatp(next->pgdir); // 加载页表基址
+            switch_to(&(prev->context), &(next->context)); // 上下文切换
         }
-        local_intr_restore(intr_flag);
+        local_intr_restore(intr_flag); // 开中断
     }
 }
 
 // forkret -- the first kernel entry point of a new thread/process
 // NOTE: the addr of forkret is setted in copy_thread function
 //       after switch_to, the current proc will execute here.
+// forkret -- 新线程/进程的第一个内核入口点
+// 注意：forkret 的地址在 copy_thread 函数中设置
+//       在 switch_to 之后，当前进程将在此处执行。
 static void
 forkret(void)
 {
-    forkrets(current->tf);
+    forkrets(current->tf); // 跳转到 forkrets，进而恢复上下文回到用户态或线程函数
 }
 
 // hash_proc - add proc into proc hash_list
+// hash_proc - 将 proc 加入 proc 哈希表
 static void
 hash_proc(struct proc_struct *proc)
 {
@@ -287,6 +299,7 @@ hash_proc(struct proc_struct *proc)
 }
 
 // unhash_proc - delete proc from proc hash_list
+// unhash_proc - 从 proc 哈希表删除 proc
 static void
 unhash_proc(struct proc_struct *proc)
 {
@@ -294,6 +307,7 @@ unhash_proc(struct proc_struct *proc)
 }
 
 // find_proc - find proc frome proc hash_list according to pid
+// find_proc - 根据 pid 从 proc 哈希表查找进程
 struct proc_struct *
 find_proc(int pid)
 {
