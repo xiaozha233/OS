@@ -9,9 +9,6 @@
 #include <kmalloc.h>
 
 /* *
- * __alloc_inode - alloc a inode structure and initialize in_type
- * */
-/* *
  * __alloc_inode - 分配一个inode结构并初始化in_type
  * */
 struct inode *
@@ -23,10 +20,6 @@ __alloc_inode(int type) {
     return node;
 }
 
-/* *
- * inode_init - initialize a inode structure
- * invoked by vop_init
- * */
 /* *
  * inode_init - 初始化inode结构
  * 由vop_init调用
@@ -40,10 +33,6 @@ inode_init(struct inode *node, const struct inode_ops *ops, struct fs *fs) {
 }
 
 /* *
- * inode_kill - kill a inode structure
- * invoked by vop_kill
- * */
-/* *
  * inode_kill - 销毁inode结构
  * 由vop_kill调用
  * */
@@ -55,10 +44,6 @@ inode_kill(struct inode *node) {
 }
 
 /* *
- * inode_ref_inc - increment ref_count
- * invoked by vop_ref_inc
- * */
-/* *
  * inode_ref_inc - 增加引用计数
  * 由vop_ref_inc调用
  * */
@@ -68,11 +53,6 @@ inode_ref_inc(struct inode *node) {
     return node->ref_count;
 }
 
-/* *
- * inode_ref_dec - decrement ref_count
- * invoked by vop_ref_dec
- * calls vop_reclaim if the ref_count hits zero
- * */
 /* *
  * inode_ref_dec - 减少引用计数
  * 由vop_ref_dec调用
@@ -93,10 +73,6 @@ inode_ref_dec(struct inode *node) {
 }
 
 /* *
- * inode_open_inc - increment the open_count
- * invoked by vop_open_inc
- * */
-/* *
  * inode_open_inc - 增加打开计数
  * 由vop_open_inc调用
  * */
@@ -106,11 +82,6 @@ inode_open_inc(struct inode *node) {
     return node->open_count;
 }
 
-/* *
- * inode_open_dec - decrement the open_count
- * invoked by vop_open_dec
- * calls vop_close if the open_count hits zero
- * */
 /* *
  * inode_open_dec - 减少打开计数
  * 由vop_open_dec调用
@@ -130,10 +101,6 @@ inode_open_dec(struct inode *node) {
     return open_count;
 }
 
-/* *
- * inode_check - check the various things being valid
- * called before all vop_* calls
- * */
 /* *
  * inode_check - 检查各种事项是否有效
  * 在所有vop_*调用之前调用

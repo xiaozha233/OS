@@ -218,8 +218,10 @@ file_read(int fd, void *base, size_t len, size_t *copied_store) {
     }
     fd_array_acquire(file);
 
+    // 初始化 I/O 缓冲区，包含用户缓冲区地址 base、读取长度 len 以及文件当前偏移量 file->pos
     struct iobuf __iob, *iob = iobuf_init(&__iob, base, len, file->pos);
-    ret = vop_read(file->node, iob);
+    // 调用 VFS 层的抽象 inode 操作 vop_read，通过 inode 找到具体文件系统的实现进行读取
+    ret = vop_read(file->node, iob); 
 
     size_t copied = iobuf_used(iob);
     if (file->status == FD_OPENED) {

@@ -1,3 +1,17 @@
+/*
+ * SFS (Simple File System) Inode 操作实现
+ * 
+ * 本文件包含了 SFS 文件系统的 inode 操作实现。
+ * 它提供了在 SFS 中处理文件和目录的核心机制，
+ * 充当 VFS (虚拟文件系统) 和 SFS 磁盘结构之间的桥梁。
+ * 
+ * 主要功能包括：
+ * - Inode 生命周期管理：创建、查找、从磁盘加载和回收。
+ * - 文件 I/O：读写文件数据，处理块对齐和分配。
+ * - 目录操作：查找文件，列出目录项。
+ * - 文件系统抽象：实现 VFS 的标准 `inode_ops` 接口。
+ * - 块管理：使用直接和间接指针将逻辑文件块映射到物理磁盘块。
+ */
 #include <defs.h>
 #include <string.h>
 #include <stdlib.h>
@@ -17,7 +31,7 @@ static const struct inode_ops sfs_node_dirops;  // dir operations
 static const struct inode_ops sfs_node_fileops; // file operations
 
 /*
- * lock_sin - lock the process of inode Rd/Wr
+ * lock_sin - 锁定 inode 的读写操作
  * 锁定 inode 的读写操作，通过信号量实现互斥访问
  */
 static void
@@ -27,7 +41,7 @@ lock_sin(struct sfs_inode *sin) {
 }
 
 /*
- * unlock_sin - unlock the process of inode Rd/Wr
+ * unlock_sin - 解锁 inode 的读写操作
  * 解锁 inode 的读写操作
  */
 static void
@@ -37,7 +51,7 @@ unlock_sin(struct sfs_inode *sin) {
 }
 
 /*
- * sfs_get_ops - return function addr of fs_node_dirops/sfs_node_fileops
+ * sfs_get_ops - 返回 fs_node_dirops/sfs_node_fileops 函数地址
  * 根据文件类型获取对应的 inode 操作函数表指针
  */
 static const struct inode_ops *
@@ -55,7 +69,7 @@ sfs_get_ops(uint16_t type) {
 }
 
 /*
- * sfs_hash_list - return inode entry in sfs->hash_list
+ * sfs_hash_list - 返回 sfs->hash_list 中的 inode 条目
  * 根据 inode 编号获取哈希链表中的对应项
  */
 static list_entry_t *
@@ -65,7 +79,7 @@ sfs_hash_list(struct sfs_fs *sfs, uint32_t ino) {
 }
 
 /*
- * sfs_set_links - link inode sin in sfs->linked-list AND sfs->hash_link
+ * sfs_set_links - 将 inode sin 链接到 sfs->linked-list 和 sfs->hash_link
  * 将 inode 插入到 SFS 的 inode 链表和哈希链表中
  */
 static void
@@ -77,7 +91,7 @@ sfs_set_links(struct sfs_fs *sfs, struct sfs_inode *sin) {
 }
 
 /*
- * sfs_remove_links - unlink inode sin in sfs->linked-list AND sfs->hash_link
+ * sfs_remove_links - 将 inode sin 从 sfs->linked-list 和 sfs->hash_link 中解链
  * 将 inode 从 SFS 的 inode 链表和哈希链表中移除
  */
 static void
@@ -89,7 +103,7 @@ sfs_remove_links(struct sfs_inode *sin) {
 }
 
 /*
- * sfs_block_inuse - check the inode with NO. ino inuse info in bitmap
+ * sfs_block_inuse - 检查位图中编号为 ino 的 inode 使用情况
  * 检查指定编号的磁盘块是否已被占用
  */
 static bool
@@ -104,7 +118,7 @@ sfs_block_inuse(struct sfs_fs *sfs, uint32_t ino) {
 }
 
 /*
- * sfs_block_alloc -  check and get a free disk block
+ * sfs_block_alloc - 检查并获取一个空闲磁盘块
  * 分配一个新的空闲磁盘块
  */
 static int
@@ -125,7 +139,7 @@ sfs_block_alloc(struct sfs_fs *sfs, uint32_t *ino_store) {
 }
 
 /*
- * sfs_block_free - set related bits for ino block to 1(means free) in bitmap, add sfs->super.unused_blocks, set superblock dirty *
+ * sfs_block_free - 在位图中将 ino 块的相关位设为 1（表示空闲），增加 sfs->super.unused_blocks，设置 superblock 为 dirty
  * 释放一个磁盘块
  */
 static void
@@ -139,7 +153,7 @@ sfs_block_free(struct sfs_fs *sfs, uint32_t ino) {
 }
 
 /*
- * sfs_create_inode - alloc a inode in memroy, and init din/ino/dirty/reclian_count/sem fields in sfs_inode in inode
+ * sfs_create_inode - 在内存中分配一个 inode，并初始化 sfs_inode 中的 din/ino/dirty/reclian_count/sem 字段
  * 在内存中创建一个新的 inode，并初始化相关字段
  */
 static int
@@ -162,10 +176,10 @@ sfs_create_inode(struct sfs_fs *sfs, struct sfs_disk_inode *din, uint32_t ino, s
 }
 
 /*
- * lookup_sfs_nolock - according ino, find related inode
+ * lookup_sfs_nolock - 根据 ino 查找相关的 inode
  * 根据 inode 编号查找内存中已存在的 inode，无需加锁
  *
- * NOTICE: le2sin, info2node MACRO
+ * 注意：le2sin, info2node 宏
  */
 static struct inode *
 lookup_sfs_nolock(struct sfs_fs *sfs, uint32_t ino) {
@@ -190,8 +204,8 @@ lookup_sfs_nolock(struct sfs_fs *sfs, uint32_t ino) {
 }
 
 /*
- * sfs_load_inode - If the inode isn't existed, load inode related ino disk block data into a new created inode.
- *                  If the inode is in memory alreadily, then do nothing
+ * sfs_load_inode - 如果 inode 不存在，将 inode 相关的 ino 磁盘块数据加载到新创建的 inode 中。
+ *                  如果 inode 已经在内存中，则什么也不做
  * 加载指定编号的 inode 到内存中。如果已存在则直接返回，否则从磁盘读取
  */
 int
@@ -242,8 +256,8 @@ failed_unlock:
 }
 
 /*
- * sfs_bmap_get_sub_nolock - according entry pointer entp and index, find the index of indrect disk block
- *                           return the index of indrect disk block to ino_store. no lock protect
+ * sfs_bmap_get_sub_nolock - 根据条目指针 entp 和索引，查找间接磁盘块的索引
+ *                           将间接磁盘块的索引返回给 ino_store。无锁保护
  * 处理间接块索引，获取或分配下一级块的编号
  * @sfs:      sfs 文件系统结构
  * @entp:     指向入口块号的指针（例如一级间接块的入口）
@@ -306,8 +320,8 @@ failed_cleanup:
 }
 
 /*
- * sfs_bmap_get_nolock - according sfs_inode and index of block, find the NO. of disk block
- *                       no lock protect
+ * sfs_bmap_get_nolock - 根据 sfs_inode 和块索引，查找磁盘块号
+ *                       无锁保护
  * 获取指定逻辑块索引（index）对应的磁盘块号（ino_store），支持自动创建
  * @sfs:      sfs 文件系统结构
  * @sin:      sfs inode 结构
@@ -361,7 +375,7 @@ out:
 }
 
 /*
- * sfs_bmap_free_sub_nolock - set the entry item to 0 (free) in the indirect block
+ * sfs_bmap_free_sub_nolock - 将间接块中的条目设置为 0（空闲）
  * 释放间接块中的某一项（释放其指向的数据块）
  */
 static int
@@ -387,7 +401,7 @@ sfs_bmap_free_sub_nolock(struct sfs_fs *sfs, uint32_t ent, uint32_t index) {
 }
 
 /*
- * sfs_bmap_free_nolock - free a block with logical index in inode and reset the inode's fields
+ * sfs_bmap_free_nolock - 释放 inode 中指定逻辑索引的块并重置 inode 字段
  * 释放文件内指定逻辑索引的磁盘块
  */
 static int
@@ -421,11 +435,11 @@ sfs_bmap_free_nolock(struct sfs_fs *sfs, struct sfs_inode *sin, uint32_t index) 
 }
 
 /*
- * sfs_bmap_load_nolock - according to the DIR's inode and the logical index of block in inode, find the NO. of disk block.
- * @sfs:      sfs file system
- * @sin:      sfs inode in memory
- * @index:    the logical index of disk block in inode
- * @ino_store:the NO. of disk block
+ * sfs_bmap_load_nolock - 根据目录的 inode 和 inode 中块的逻辑索引，查找磁盘块号。
+ * @sfs:      sfs 文件系统
+ * @sin:      内存中的 sfs inode
+ * @index:    inode 中磁盘块的逻辑索引
+ * @ino_store:磁盘块号
  * 加载（获取）文件逻辑块对应的物理磁盘块号。如果是追加写，可能会创建新块。
  */
 static int
@@ -452,7 +466,7 @@ sfs_bmap_load_nolock(struct sfs_fs *sfs, struct sfs_inode *sin, uint32_t index, 
 }
 
 /*
- * sfs_bmap_truncate_nolock - free the disk block at the end of file
+ * sfs_bmap_truncate_nolock - 释放文件末尾的磁盘块
  * 截断文件，移除文件末尾的一个块
  */
 static int
@@ -471,11 +485,11 @@ sfs_bmap_truncate_nolock(struct sfs_fs *sfs, struct sfs_inode *sin) {
 }
 
 /*
- * sfs_dirent_read_nolock - read the file entry from disk block which contains this entry
- * @sfs:      sfs file system
- * @sin:      sfs inode in memory
- * @slot:     the index of file entry
- * @entry:    file entry
+ * sfs_dirent_read_nolock - 从包含该条目的磁盘块中读取文件条目
+ * @sfs:      sfs 文件系统
+ * @sin:      内存中的 sfs inode (目录)
+ * @slot:     文件条目的索引
+ * @entry:    文件条目
  * 读取目录中的第 slot 个目录项
  */
 static int
@@ -514,14 +528,14 @@ sfs_dirent_read_nolock(struct sfs_fs *sfs, struct sfs_inode *sin, int slot, stru
     } while (0)
 
 /*
- * sfs_dirent_search_nolock - read every file entry in the DIR, compare file name with each entry->name
- *                            If equal, then return slot and NO. of disk of this file's inode
- * @sfs:        sfs file system
- * @sin:        sfs inode in memory
- * @name:       the filename
- * @ino_store:  NO. of disk of this file (with the filename)'s inode
- * @slot:       logical index of file entry (NOTICE: each file entry ocupied one  disk block)
- * @empty_slot: the empty logical index of file entry.
+ * sfs_dirent_search_nolock - 读取目录中的每个文件条目，比较文件名与 entry->name
+ *                            如果相等，则返回 slot 和该文件 inode 的磁盘编号
+ * @sfs:        sfs 文件系统
+ * @sin:        内存中的 sfs inode (目录)
+ * @name:       文件名
+ * @ino_store:  该文件(具有该文件名)的 inode 的磁盘编号
+ * @slot:       文件条目的逻辑索引 (注意：每个文件条目占用一个磁盘块)
+ * @empty_slot: 文件条目的空逻辑索引
  * 在目录中搜索文件名，返回对应的 inode 编号和目录项槽位
  */
 static int
@@ -565,7 +579,7 @@ out:
 }
 
 /*
- * sfs_dirent_findino_nolock - read all file entries in DIR's inode and find a entry->ino == ino
+ * sfs_dirent_findino_nolock - 读取目录 inode 中的所有文件条目，并查找 entry->ino == ino
  * 在目录中查找具有指定 inode 编号的目录项
  */
 
@@ -587,12 +601,12 @@ sfs_dirent_findino_nolock(struct sfs_fs *sfs, struct sfs_inode *sin, uint32_t in
 }
 
 /*
- * sfs_lookup_once - find inode corresponding the file name in DIR's sin inode 
- * @sfs:        sfs file system
- * @sin:        DIR sfs inode in memory
- * @name:       the file name in DIR
- * @node_store: the inode corresponding the file name in DIR
- * @slot:       the logical index of file entry
+ * sfs_lookup_once - 在目录的 inode 中查找对应文件名的 inode
+ * @sfs:        sfs 文件系统
+ * @sin:        内存中的目录 sfs inode
+ * @name:       目录下的文件名
+ * @node_store: 对应的 inode
+ * @slot:       文件条目的逻辑索引
  * 在目录 inode (sin) 中查找名为 name 的文件，并返回其 inode
  */
 static int
@@ -612,8 +626,7 @@ sfs_lookup_once(struct sfs_fs *sfs, struct sfs_inode *sin, const char *name, str
     return ret;
 }
 
-// sfs_opendir - just check the opne_flags, now support readonly
-// 打开目录，目前只支持只读模式检查
+// sfs_opendir - 打开目录，目前只支持只读模式检查
 static int
 sfs_opendir(struct inode *node, uint32_t open_flags) {
     switch (open_flags & O_ACCMODE) {
@@ -631,28 +644,26 @@ sfs_opendir(struct inode *node, uint32_t open_flags) {
     return 0;
 }
 
-// sfs_openfile - open file (no use)
-// 打开文件（目前没有特殊操作）
+// sfs_openfile - 打开文件（目前没有特殊操作）
 static int
 sfs_openfile(struct inode *node, uint32_t open_flags) {
     return 0;
 }
 
-// sfs_close - close file
-// 关闭文件，尝试同步数据
+// sfs_close - 关闭文件，尝试同步数据
 static int
 sfs_close(struct inode *node) {
     return vop_fsync(node);
 }
 
 /*  
- * sfs_io_nolock - Rd/Wr a file contentfrom offset position to offset+ length  disk blocks<-->buffer (in memroy)
- * @sfs:      sfs file system
- * @sin:      sfs inode in memory
- * @buf:      the buffer Rd/Wr
- * @offset:   the offset of file
- * @alenp:    the length need to read (is a pointer). and will RETURN the really Rd/Wr lenght
- * @write:    BOOL, 0 read, 1 write
+ * sfs_io_nolock - 读/写文件内容，从 offset 位置开始，长度为 alenp，磁盘块 <--> 缓冲区 (内存)
+ * @sfs:      sfs 文件系统
+ * @sin:      内存中的 sfs inode
+ * @buf:      读/写缓冲区
+ * @offset:   文件偏移量
+ * @alenp:    需要读写的长度 (指针)。将返回实际读写的长度
+ * @write:    BOOL, 0 读取, 1 写入
  * 无锁的文件 IO 操作核心函数，处理不对齐读写和块读写
  */
 static int
@@ -693,21 +704,22 @@ sfs_io_nolock(struct sfs_fs *sfs, struct sfs_inode *sin, void *buf, off_t offset
     }
 
     int ret = 0;
+    // size表示每次循环读写的大小，alen表示累计读写的字节数
     size_t size, alen = 0;
-    uint32_t ino;
+    uint32_t ino; // 磁盘块号
     // 计算起始块号和涉及的块数
-    uint32_t blkno = offset / SFS_BLKSIZE;          // The NO. of Rd/Wr begin block
-    uint32_t nblks = endpos / SFS_BLKSIZE - blkno;  // The size of Rd/Wr blocks
+    uint32_t blkno = offset / SFS_BLKSIZE;          // 读写起始块号
+    uint32_t nblks = endpos / SFS_BLKSIZE - blkno;  // 读写块数
 
   //LAB8:EXERCISE1 2314035 HINT: call sfs_bmap_load_nolock, sfs_rbuf, sfs_rblock,etc. read different kind of blocks in file
 	/*
-	 * (1) If offset isn't aligned with the first block, Rd/Wr some content from offset to the end of the first block
-	 *       NOTICE: useful function: sfs_bmap_load_nolock, sfs_buf_op
-	 *               Rd/Wr size = (nblks != 0) ? (SFS_BLKSIZE - blkoff) : (endpos - offset)
-	 * (2) Rd/Wr aligned blocks 
-	 *       NOTICE: useful function: sfs_bmap_load_nolock, sfs_block_op
-     * (3) If end position isn't aligned with the last block, Rd/Wr some content from begin to the (endpos % SFS_BLKSIZE) of the last block
-	 *       NOTICE: useful function: sfs_bmap_load_nolock, sfs_buf_op	
+	 * (1) 如果 offset 没有与第一个块对齐，读/写从 offset 到第一个块结束的部分内容
+	 *       注意：有用函数：sfs_bmap_load_nolock, sfs_buf_op
+	 *               读/写大小 = (nblks != 0) ? (SFS_BLKSIZE - blkoff) : (endpos - offset)
+	 * (2) 读/写对齐的块
+	 *       注意：有用函数：sfs_bmap_load_nolock, sfs_block_op
+     * (3) 如果结束位置没有与最后一个块对齐，读/写从开始到最后一个块的 (endpos % SFS_BLKSIZE) 的部分内容
+	 *       注意：有用函数：sfs_bmap_load_nolock, sfs_buf_op	
 	*/
 
     // 计算起始块内偏移
@@ -720,7 +732,7 @@ sfs_io_nolock(struct sfs_fs *sfs, struct sfs_inode *sin, void *buf, off_t offset
         // - 如果没有后续块(nblks == 0)，只处理 endpos - offset（全部在一块内）
         size = (nblks != 0) ? (SFS_BLKSIZE - blkoff) : (endpos - offset);
         
-        // 获取磁盘块号
+        // 从逻辑块号blkno获取磁盘块号，存入 ino
         if ((ret = sfs_bmap_load_nolock(sfs, sin, blkno, &ino)) != 0) {
             goto out;
         }
@@ -737,8 +749,8 @@ sfs_io_nolock(struct sfs_fs *sfs, struct sfs_inode *sin, void *buf, off_t offset
         if (nblks == 0) {
             goto out;
         }
-        blkno++;
-        nblks--;
+        blkno++; // 移动到下一个块
+        nblks--; // 减少待处理块数
     }
 
     // 情况2：处理中间的完整块
@@ -786,15 +798,14 @@ out:
     *alenp = alen;
     // 如果是写操作且超出了原文件大小，更新文件大小
     if (offset + alen > sin->din->size) {
-        sin->din->size = offset + alen;
-        sin->dirty = 1;
+        sin->din->size = offset + alen; // 更新文件大小
+        sin->dirty = 1; // 标记 inode 为脏
     }
     return ret;
 }
 
 /*
- * sfs_io - Rd/Wr file. the wrapper of sfs_io_nolock
-            with lock protect
+ * sfs_io - 读/写文件。sfs_io_nolock 的加锁封装
  * sfs_io_nolock 的加锁封装
  */
 static inline int
@@ -816,14 +827,14 @@ sfs_io(struct inode *node, struct iobuf *iob, bool write) {
     return ret;
 }
 
-// sfs_read - read file
+// sfs_read - 读文件
 // 读文件：调用通用的 IO 函数
 static int
 sfs_read(struct inode *node, struct iobuf *iob) {
     return sfs_io(node, iob, 0);
 }
 
-// sfs_write - write file
+// sfs_write - 写文件
 // 写文件：调用通用的 IO 函数
 static int
 sfs_write(struct inode *node, struct iobuf *iob) {
@@ -831,7 +842,7 @@ sfs_write(struct inode *node, struct iobuf *iob) {
 }
 
 /*
- * sfs_fstat - Return nlinks/block/size, etc. info about a file. The pointer is a pointer to struct stat;
+ * sfs_fstat - 返回文件的 nlinks/block/size 等信息。pointer 是指向 struct stat 的指针；
  * 获取文件状态信息（大小、类型、链接数等）
  */
 static int
@@ -850,7 +861,7 @@ sfs_fstat(struct inode *node, struct stat *stat) {
 }
 
 /*
- * sfs_fsync - Force any dirty inode info associated with this file to stable storage.
+ * sfs_fsync - 强制将与此文件相关的任何脏 inode 信息写入稳定存储。
  * 同步文件：将 inode 的修改写入磁盘
  */
 static int
@@ -875,7 +886,7 @@ sfs_fsync(struct inode *node) {
 }
 
 /*
- *sfs_namefile -Compute pathname relative to filesystem root of the file and copy to the specified io buffer.
+ * sfs_namefile - 计算文件相对于文件系统根目录的路径名，并复制到指定的 io 缓冲区。
  * 获取文件的绝对路径名（相对于文件系统根目录）
  */
 static int
@@ -949,7 +960,7 @@ failed:
 }
 
 /*
- * sfs_getdirentry_sub_noblock - get the content of file entry in DIR
+ * sfs_getdirentry_sub_noblock - 获取 DIR 中的文件条目内容
  * 获取目录中指定位置的目录项内容（不加锁）
  */
 static int
@@ -973,8 +984,8 @@ sfs_getdirentry_sub_nolock(struct sfs_fs *sfs, struct sfs_inode *sin, int slot, 
 }
 
 /*
- * sfs_getdirentry - according to the iob->io_offset, calculate the dir entry's slot in disk block,
-                     get dir entry content from the disk 
+ * sfs_getdirentry - 根据 iob->io_offset，计算磁盘块中的目录条目槽位
+                     从磁盘获取目录条目内容 
  * 获取目录项信息（带锁保护）
  */
 static int
@@ -1015,7 +1026,7 @@ out:
 }
 
 /*
- * sfs_reclaim - Free all resources inode occupied . Called when inode is no longer in use. 
+ * sfs_reclaim - 释放 inode 占用的所有资源。当 inode 不再使用时调用。
  * 回收 inode 占用的资源
  */
 static int
@@ -1065,7 +1076,7 @@ failed_unlock:
 }
 
 /*
- * sfs_gettype - Return type of file. The values for file types are in sfs.h.
+ * sfs_gettype - 返回文件类型。文件类型的值在 sfs.h 中定义。
  * 获取文件类型
  */
 static int
@@ -1086,7 +1097,7 @@ sfs_gettype(struct inode *node, uint32_t *type_store) {
 }
 
 /* 
- * sfs_tryseek - Check if seeking to the specified position within the file is legal.
+ * sfs_tryseek - 检查是否合法地定位到文件内的指定位置。
  * 检查 seek 操作是否合法
  */
 static int
@@ -1103,7 +1114,7 @@ sfs_tryseek(struct inode *node, off_t pos) {
 }
 
 /*
- * sfs_truncfile : reszie the file with new length
+ * sfs_truncfile : 使用新长度调整文件大小
  * 调整文件大小（截断或扩展）
  */
 static int
@@ -1156,9 +1167,7 @@ out_unlock:
 }
 
 /*
- * sfs_lookup - Parse path relative to the passed directory
- *              DIR, and hand back the inode for the file it
- *              refers to.
+ * sfs_lookup - 解析相对于传入目录 DIR 的路径，并返回其引用的文件的 inode。
  * 在目录中查找文件并返回 inode
  */
 static int
@@ -1184,7 +1193,7 @@ sfs_lookup(struct inode *node, char *path, struct inode **node_store) {
     return 0;
 }
 
-// The sfs specific DIR operations correspond to the abstract operations on a inode.
+// sfs 特定的 DIR 操作对应于 inode 上的抽象操作。
 // 目录 inode 操作函数表
 static const struct inode_ops sfs_node_dirops = {
     .vop_magic                      = VOP_MAGIC,
@@ -1198,7 +1207,7 @@ static const struct inode_ops sfs_node_dirops = {
     .vop_gettype                    = sfs_gettype,
     .vop_lookup                     = sfs_lookup,
 };
-/// The sfs specific FILE operations correspond to the abstract operations on a inode.
+/// sfs 特定的 FILE 操作对应于 inode 上的抽象操作。
 // 文件 inode 操作函数表
 static const struct inode_ops sfs_node_fileops = {
     .vop_magic                      = VOP_MAGIC,

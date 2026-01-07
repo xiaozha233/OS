@@ -21,7 +21,8 @@ close(int fd) {
 // read - 读取文件
 int
 read(int fd, void *base, size_t len) {
-    return sys_read(fd, base, len); // 调用sys_read系统调用
+    // 调用sys_read系统调用，跳转到syscall.c的sys_read
+    return sys_read(fd, base, len); 
 }
 
 // write - 写入文件

@@ -15,21 +15,21 @@
 #include <fs.h>
 #include <vfs.h>
 #include <sysfile.h>
-/* ------------- process/thread mechanism design&implementation -------------
-(an simplified Linux process/thread mechanism )
-introduction:
-  ucore implements a simple process/thread mechanism. process contains the independent memory sapce, at least one threads
-for execution, the kernel data(for management), processor state (for context switch), files(in lab6), etc. ucore needs to
-manage all these details efficiently. In ucore, a thread is just a special kind of process(share process's memory).
+/* ------------- 进程/线程机制设计与实现 -------------
+(简单的 Linux 进程/线程机制)
+介绍：
+  ucore 实现了一个简单的进程/线程机制。进程包含独立的内存空间，至少一个用于执行的线程，
+  内核数据（用于管理），处理器状态（用于上下文切换），文件（在 lab6 中），等等。
+  ucore 需要有效地管理所有这些细节。在 ucore 中，线程只是一种特殊的进程（共享进程的内存）。
 ------------------------------
-process state       :     meaning               -- reason
-    PROC_UNINIT     :   uninitialized           -- alloc_proc
-    PROC_SLEEPING   :   sleeping                -- try_free_pages, do_wait, do_sleep
-    PROC_RUNNABLE   :   runnable(maybe running) -- proc_init, wakeup_proc,
-    PROC_ZOMBIE     :   almost dead             -- do_exit
+进程状态        :     含义                    -- 原因
+    PROC_UNINIT     :   未初始化                -- alloc_proc
+    PROC_SLEEPING   :   睡眠                    -- try_free_pages, do_wait, do_sleep
+    PROC_RUNNABLE   :   可运行（可能正在运行）   -- proc_init, wakeup_proc,
+    PROC_ZOMBIE     :   几乎死亡                -- do_exit
 
 -----------------------------
-process state changing:
+进程状态变化：
 
   alloc_proc                                 RUNNING
       +                                   +--<----<--+
@@ -41,23 +41,23 @@ PROC_UNINIT -- proc_init/wakeup_proc --> PROC_RUNNABLE -- try_free_pages/do_wait
                                            +                                                                  +
                                            -----------------------wakeup_proc----------------------------------
 -----------------------------
-process relations
-parent:           proc->parent  (proc is children)
-children:         proc->cptr    (proc is parent)
-older sibling:    proc->optr    (proc is younger sibling)
-younger sibling:  proc->yptr    (proc is older sibling)
+进程关系
+父进程：          proc->parent  (proc 是子进程)
+子进程：          proc->cptr    (proc 是父进程)
+年长兄弟：        proc->optr    (proc 是更年轻的兄弟)
+年轻兄弟：        proc->yptr    (proc 是更年长的兄弟)
 -----------------------------
-related syscall for process:
-SYS_exit        : process exit,                           -->do_exit
-SYS_fork        : create child process, dup mm            -->do_fork-->wakeup_proc
-SYS_wait        : wait process                            -->do_wait
-SYS_exec        : after fork, process execute a program   -->load a program and refresh the mm
-SYS_clone       : create child thread                     -->do_fork-->wakeup_proc
-SYS_yield       : process flag itself need resecheduling, -- proc->need_sched=1, then scheduler will rescheule this process
-SYS_sleep       : process sleep                           -->do_sleep
-SYS_kill        : kill process                            -->do_kill-->proc->flags |= PF_EXITING
+与进程相关的系统调用：
+SYS_exit        : 进程退出,                               -->do_exit
+SYS_fork        : 创建子进程, 复制 mm                      -->do_fork-->wakeup_proc
+SYS_wait        : 等待进程                                -->do_wait
+SYS_exec        : fork 后, 进程执行一个程序                 -->load a program and refresh the mm
+SYS_clone       : 创建子线程                               -->do_fork-->wakeup_proc
+SYS_yield       : 进程标记自己需要重新调度,                   -- proc->need_sched=1, then scheduler will rescheule this process
+SYS_sleep       : 进程睡眠                                 -->do_sleep
+SYS_kill        : 杀死进程                                 -->do_kill-->proc->flags |= PF_EXITING
                                                                  -->wakeup_proc-->do_wait-->do_exit
-SYS_getpid      : get the process's pid
+SYS_getpid      : 获取进程的 pid
 
 */
 
@@ -99,43 +99,43 @@ alloc_proc(void)
     {
         // LAB4:填写你在lab4中实现的代码 已填写
         /*
-         * below fields in proc_struct need to be initialized
-         *       enum proc_state state;                      // Process state
-         *       int pid;                                    // Process ID
-         *       int runs;                                   // the running times of Proces
-         *       uintptr_t kstack;                           // Process kernel stack
-         *       volatile bool need_resched;                 // bool value: need to be rescheduled to release CPU?
-         *       struct proc_struct *parent;                 // the parent process
-         *       struct mm_struct *mm;                       // Process's memory management field
-         *       struct context context;                     // Switch here to run process
-         *       struct trapframe *tf;                       // Trap frame for current interrupt
-         *       uintptr_t pgdir;                            // the base addr of Page Directroy Table(PDT)
-         *       uint32_t flags;                             // Process flag
-         *       char name[PROC_NAME_LEN + 1];               // Process name
+         * proc_struct 中的以下字段需要初始化
+         *       enum proc_state state;                      // 进程状态
+         *       int pid;                                    // 进程 ID
+         *       int runs;                                   // 进程运行时间
+         *       uintptr_t kstack;                           // 进程内核栈
+         *       volatile bool need_resched;                 // 布尔值: 是否需要重新调度以释放 CPU?
+         *       struct proc_struct *parent;                 // 父进程
+         *       struct mm_struct *mm;                       // 进程的内存管理字段
+         *       struct context context;                     // 切换到这里运行进程
+         *       struct trapframe *tf;                       // 当前中断的中断帧
+         *       uintptr_t pgdir;                            // 页目录表 (PDT) 的基地址
+         *       uint32_t flags;                             // 进程标志
+         *       char name[PROC_NAME_LEN + 1];               // 进程名称
          */
 
         // LAB5:填写你在lab5中实现的代码 (update LAB4 steps)已填写
         /*
-         * below fields(add in LAB5) in proc_struct need to be initialized
-         *       uint32_t wait_state;                        // waiting state
-         *       struct proc_struct *cptr, *yptr, *optr;     // relations between processes
+         * proc_struct 中的以下字段（在 LAB5 中添加）需要初始化
+         *       uint32_t wait_state;                        // 等待状态
+         *       struct proc_struct *cptr, *yptr, *optr;     // 进程间的关系
          */
 
         // LAB6:填写你在lab6中实现的代码 (update LAB5 steps)已填写
         /*
-         * below fields(add in LAB6) in proc_struct need to be initialized
-         *       struct run_queue *rq;                       // run queue contains Process
-         *       list_entry_t run_link;                      // the entry linked in run queue
-         *       int time_slice;                             // time slice for occupying the CPU
-         *       skew_heap_entry_t lab6_run_pool;            // entry in the run pool (lab6 stride)
-         *       uint32_t lab6_stride;                       // stride value (lab6 stride)
-         *       uint32_t lab6_priority;                     // priority value (lab6 stride)
+         * proc_struct 中的以下字段（在 LAB6 中添加）需要初始化
+         *       struct run_queue *rq;                       // 包含进程的运行队列
+         *       list_entry_t run_link;                      // 运行队列中的连接条目
+         *       int time_slice;                             // 占用 CPU 的时间片
+         *       skew_heap_entry_t lab6_run_pool;            // 运行池中的条目 (lab6 stride)
+         *       uint32_t lab6_stride;                       // 步长值 (lab6 stride)
+         *       uint32_t lab6_priority;                     // 优先级值 (lab6 stride)
          */
 
-        //LAB8 2314076 : (update LAB6 steps)
+        //LAB8 2314076 : (更新 LAB6 步骤)
         /*
-         * below fields(add in LAB6) in proc_struct need to be initialized
-         *       struct files_struct * filesp;                file struct point        
+         * proc_struct 中的以下字段（在 LAB6 中添加）需要初始化
+         *       struct files_struct * filesp;                文件结构指针        
          */
         proc->state = PROC_UNINIT; // 设置初始状态为未初始化
         proc->pid = -1; // PID设为-1
@@ -272,19 +272,19 @@ void proc_run(struct proc_struct *proc)
 {
     // LAB4:填写你在lab4中实现的代码
         /*
-        * Some Useful MACROs, Functions and DEFINEs, you can use them in below implementation.
-        * MACROs or Functions:
-        *   local_intr_save():        Disable interrupts
-        *   local_intr_restore():     Enable Interrupts
-        *   lcr3():                   Modify the value of CR3 register
-        *   switch_to():              Context switching between two processes
+        * 下面的实现中可以使用一些有用的宏、函数和定义。
+        * 宏或函数：
+        *   local_intr_save():        禁用中断
+        *   local_intr_restore():     启用中断
+        *   lcr3():                   修改 CR3 寄存器的值
+        *   switch_to():              两个进程之间的上下文切换
         */
-    //LAB8 2313255 : (update LAB4 steps)
+    //LAB8 2313255 : (更新 LAB4 步骤)
       /*
-       * below fields(add in LAB6) in proc_struct need to be initialized
-       *       before switch_to();you should flush the tlb
-       *        MACROs or Functions:
-       *       flush_tlb():          flush the tlb        
+       * proc_struct 中的以下字段（在 LAB6 中添加）需要初始化
+       *       在 switch_to() 之前；你应该刷新 tlb
+       *        宏 or 函数：
+       *       flush_tlb():          刷新 tlb        
        */
     if (proc != current) { // 如果要运行的进程不是当前进程
         bool intr_flag;
@@ -558,39 +558,39 @@ int do_fork(uint32_t clone_flags, uintptr_t stack, struct trapframe *tf)
         goto fork_out;
     }
     ret = -E_NO_MEM;
-    // LAB8:EXERCISE2 2313255 HINT:how to copy the fs in parent's proc_struct?
+    // LAB8:EXERCISE2 2313255 提示：如何复制父进程 proc_struct 中的 fs？
     // LAB4:填写你在lab4中实现的代码
     /*
-     * Some Useful MACROs, Functions and DEFINEs, you can use them in below implementation.
-     * MACROs or Functions:
-     *   alloc_proc:   create a proc struct and init fields (lab4:exercise1)
-     *   setup_kstack: alloc pages with size KSTACKPAGE as process kernel stack
-     *   copy_mm:      process "proc" duplicate OR share process "current"'s mm according clone_flags
-     *                 if clone_flags & CLONE_VM, then "share" ; else "duplicate"
-     *   copy_thread:  setup the trapframe on the  process's kernel stack top and
-     *                 setup the kernel entry point and stack of process
-     *   hash_proc:    add proc into proc hash_list
-     *   get_pid:      alloc a unique pid for process
-     *   wakeup_proc:  set proc->state = PROC_RUNNABLE
-     * VARIABLES:
-     *   proc_list:    the process set's list
-     *   nr_process:   the number of process set
+     * 下面的实现中可以使用一些有用的宏、函数和定义。
+     * 宏或函数：
+     *   alloc_proc:   创建一个 proc 结构并初始化字段 (lab4:exercise1)
+     *   setup_kstack: 分配大小为 KSTACKPAGE 的页面作为进程内核栈
+     *   copy_mm:      根据 clone_flags 复制或共享进程 "proc" 与进程 "current" 的 mm
+     *                 如果 clone_flags & CLONE_VM，则 "共享"；否则 "复制"
+     *   copy_thread:  在进程的内核栈顶设置中断帧，并
+     *                 设置内核入口点和进程栈
+     *   hash_proc:    将进程添加到进程哈希列表中
+     *   get_pid:      为进程分配唯一的 pid
+     *   wakeup_proc:  设置 proc->state = PROC_RUNNABLE
+     * 变量：
+     *   proc_list:    进程集合列表
+     *   nr_process:   进程集合的数量
      */
 
-    //    1. call alloc_proc to allocate a proc_struct
-    //    2. call setup_kstack to allocate a kernel stack for child process
-    //    3. call copy_mm to dup OR share mm according clone_flag
-    //    4. call copy_thread to setup tf & context in proc_struct
-    //    5. insert proc_struct into hash_list && proc_list
-    //    6. call wakeup_proc to make the new child process RUNNABLE
-    //    7. set ret vaule using child proc's pid
+    //    1. 调用 alloc_proc 分配一个 proc_struct
+    //    2. 调用 setup_kstack 为子进程分配内核栈
+    //    3. 根据 clone_flag 调用 copy_mm 复制或共享 mm
+    //    4. 调用 copy_thread 在 proc_struct 中设置 tf 和 context
+    //    5. 将 proc_struct 插入 hash_list 和 proc_list
+    //    6. 调用 wakeup_proc 使新的子进程变为 RUNNABLE
+    //    7. 使用子进程的 pid 设置返回值 ret
 
-    // LAB5:填写你在lab5中实现的代码 (update LAB4 steps)
-    /* Some Functions
-     *    set_links:  set the relation links of process.  ALSO SEE: remove_links:  lean the relation links of process
+    // LAB5:填写你在lab5中实现的代码 (更新 LAB4 步骤)
+    /* 一些函数
+     *    set_links:  设置进程的关系链接。 另见：remove_links: 清除进程的关系链接
      *    -------------------
-     *    update step 1: set child proc's parent to current process, make sure current process's wait_state is 0
-     *    update step 5: insert proc_struct into hash_list && proc_list, set the relation links of process
+     *    更新步骤 1: 设置子进程的父进程为当前进程，确保当前进程的 wait_state 为 0
+     *    更新步骤 5: 将 proc_struct 插入 hash_list && proc_list，设置进程的关系链接
      */
     
     // 1. call alloc_proc to allocate a proc_struct
@@ -725,53 +725,57 @@ int do_exit(int error_code)
     panic("do_exit will not return!! %d.\n", current->pid);
 }
 
-// load_icode_read is used by load_icode in LAB8
 // LAB8中load_icode使用的load_icode_read函数
+// 该函数用于从文件描述符fd中读取指定偏移offset处长度为len的数据到buf中
 static int
 load_icode_read(int fd, void *buf, size_t len, off_t offset)
 {
     int ret;
+    // 使用sysfile_seek定位到文件的指定偏移位置
     if ((ret = sysfile_seek(fd, offset, LSEEK_SET)) != 0)
     {
-        return ret;
+        return ret; // 定位失败返回错误码
     }
+    // 使用sysfile_read读取指定长度的数据
     if ((ret = sysfile_read(fd, buf, len)) != len)
     {
+        // 如果读取的长度不等于请求的长度，返回错误
+        // 如果sysfile_read返回负数则为错误码，否则返回-1表示读取不完整
         return (ret < 0) ? ret : -1;
     }
-    return 0;
+    return 0; // 读取成功
 }
 
-// load_icode -  called by sys_exec-->do_execve
 // load_icode -  由sys_exec-->do_execve调用
-
+// 该函数负责将ELF二进制程序加载到当前进程的内存空间中，并设置好用户栈和参数
+// 命令行参数数组就是来自于 kargv
 static int
 load_icode(int fd, int argc, char **kargv)
 {
-    /* LAB8:EXERCISE2 2314076  HINT:how to load the file with handler fd  in to process's memory? how to setup argc/argv?
-     * MACROs or Functions:
-     *  mm_create        - create a mm
-     *  setup_pgdir      - setup pgdir in mm
-     *  load_icode_read  - read raw data content of program file
-     *  mm_map           - build new vma
-     *  pgdir_alloc_page - allocate new memory for  TEXT/DATA/BSS/stack parts
-     *  lsatp             - update Page Directory Addr Register -- CR3
+    /* LAB8:EXERCISE2 2314076  提示：如何将句柄 fd 指向的文件加载到进程内存中？如何设置 argc/argv？
+     * 宏或函数：
+     *  mm_create        - 创建一个 mm
+     *  setup_pgdir      - 在 mm 中设置 pgdir
+     *  load_icode_read  - 读取程序文件的原始内容
+     *  mm_map           - 建立新的 vma
+     *  pgdir_alloc_page - 为 TEXT/DATA/BSS/stack 部分分配新内存
+     *  lsatp            - 更新页目录地址寄存器 -- CR3
      */
-    //You can Follow the code form LAB5 which you have completed  to complete 
-    /* (1) create a new mm for current process
-     * (2) create a new PDT, and mm->pgdir= kernel virtual addr of PDT
-     * (3) copy TEXT/DATA/BSS parts in binary to memory space of process
-     *    (3.1) read raw data content in file and resolve elfhdr
-     *    (3.2) read raw data content in file and resolve proghdr based on info in elfhdr
-     *    (3.3) call mm_map to build vma related to TEXT/DATA
-     *    (3.4) callpgdir_alloc_page to allocate page for TEXT/DATA, read contents in file
-     *          and copy them into the new allocated pages
-     *    (3.5) callpgdir_alloc_page to allocate pages for BSS, memset zero in these pages
-     * (4) call mm_map to setup user stack, and put parameters into user stack
-     * (5) setup current process's mm, cr3, reset pgidr (using lsatp MARCO)
-     * (6) setup uargc and uargv in user stacks
-     * (7) setup trapframe for user environment
-     * (8) if up steps failed, you should cleanup the env.
+    //你可以按照你已经完成的 LAB5 的代码来完成
+    /* (1) 为当前进程创建一个新的 mm
+     * (2) 创建一个新的 PDT，并且 mm->pgdir= PDT 的内核虚拟地址
+     * (3) 将二进制文件中的 TEXT/DATA/BSS 部分复制到进程的内存空间
+     *    (3.1) 读取文件中的原始内容并解析 elfhdr
+     *    (3.2) 读取文件中的原始内容并根据 elfhdr 中的信息解析 proghdr
+     *    (3.3) 调用 mm_map 建立与 TEXT/DATA 相关的 vma
+     *    (3.4) 调用 pgdir_alloc_page 为 TEXT/DATA 分配页面，读取文件中的内容
+     *          并将它们复制到新分配的页面中
+     *    (3.5) 调用 pgdir_alloc_page 为 BSS 分配页面，将这些页面清零
+     * (4) 调用 mm_map 设置用户栈，并将参数放入用户栈
+     * (5) 设置当前进程的 mm, cr3, 重置 pgdir (使用 lsatp 宏)
+     * (6) 在用户栈中设置 uargc 和 uargv
+     * (7) 为用户环境设置中断帧
+     * (8) 如果上述步骤失败，你应该清理环境。
      */
     
     assert(argc >= 0 && argc <= EXEC_MAX_ARG_NUM);
@@ -780,141 +784,172 @@ load_icode(int fd, int argc, char **kargv)
     int ret = -E_NO_MEM;
     struct mm_struct *mm;
     
+    // 创建一个新的内存管理结构 mm
     if ((mm = mm_create()) == NULL) {
         goto bad_mm;
     }
+    // 为这个 mm 分配并初始化页目录表
     if (setup_pgdir(mm) != 0) {
         goto bad_pgdir_cleanup_mm;
     }
     
     // ==================== Step 2: 读取 ELF 头部 ====================
     struct elfhdr __elf, *elf = &__elf;
+    // 从文件中读取 ELF 头部信息
     if ((ret = load_icode_read(fd, elf, sizeof(struct elfhdr), 0)) != 0) {
-        goto bad_elf_cleanup_pgdir;
+        goto bad_elf_cleanup_pgdir; // 读取失败
     }
+    // 检查 ELF 魔数，确认是否为合法的 ELF 文件
     if (elf->e_magic != ELF_MAGIC) {
         ret = -E_INVAL_ELF;
-        goto bad_elf_cleanup_pgdir;
+        goto bad_elf_cleanup_pgdir; // 文件格式错误
     }
     
     // ==================== Step 3: 加载各个段 ====================
     struct proghdr __ph, *ph = &__ph;
     uint32_t vm_flags, perm;
     
+    // 遍历所有的程序头（Section Headers）
     for (int i = 0; i < elf->e_phnum; i++) {
+        // 计算当前程序头的偏移量
         off_t phoff = elf->e_phoff + sizeof(struct proghdr) * i;
+        // 读取程序头信息
         if ((ret = load_icode_read(fd, ph, sizeof(struct proghdr), phoff)) != 0) {
             goto bad_cleanup_mmap;
         }
+        // 我们只关心 LOAD 类型的段，这是需要加载到内存中的段
         if (ph->p_type != ELF_PT_LOAD) {
             continue;
         }
+        // 检查文件大小是否超过内存大小，这是非法的
         if (ph->p_filesz > ph->p_memsz) {
             ret = -E_INVAL_ELF;
             goto bad_cleanup_mmap;
         }
-        // NOTE: A PT_LOAD segment may be pure BSS (p_filesz == 0, p_memsz > 0).
-        // We must still map it and allocate/zero pages, otherwise user programs
-        // will fault when touching global variables.
+        // 注意：PT_LOAD 段可能是纯 BSS 段 (p_filesz == 0, p_memsz > 0)。
+        // 我们必须仍然映射它并分配/清零页面，否则用户程序在访问全局变量时会出错。
         if (ph->p_memsz == 0) {
-            continue;
+            continue; // 如果内存大小为0，则忽略
         }
         
-        // 设置权限
+        // 根据段的标志设置 VMA 的权限标志
         vm_flags = 0;
         perm = PTE_U;  // 用户态可访问
         if (ph->p_flags & ELF_PF_X) {
-            vm_flags |= VM_EXEC;
+            vm_flags |= VM_EXEC; // 可执行及其对应的页表项权限
             perm |= PTE_X;  // 可执行
         }
         if (ph->p_flags & ELF_PF_W) {
-            vm_flags |= VM_WRITE;
+            vm_flags |= VM_WRITE; // 可写及其对应的页表项权限
             perm |= PTE_W;  // 可写
         }
         if (ph->p_flags & ELF_PF_R) {
-            vm_flags |= VM_READ;
+            vm_flags |= VM_READ; // 可读及其对应的页表项权限
             perm |= PTE_R;  // 可读
         }
         
-        // 创建 VMA（覆盖 TEXT/DATA/BSS）
+        // 创建 VMA（虚拟内存区域），建立虚拟地址与该段的映射关系
+        // 这一步设置了 TEXT/DATA/BSS 段的虚拟地址范围和权限
         if ((ret = mm_map(mm, ph->p_va, ph->p_memsz, vm_flags, NULL)) != 0) {
             goto bad_cleanup_mmap;
         }
 
-        // 纯 BSS 段：直接分配并清零
+        // 处理纯 BSS 段：只分配内存并清零，无需从文件读取
         if (ph->p_filesz == 0) {
             uintptr_t start = ph->p_va, end = ph->p_va + ph->p_memsz;
-            uintptr_t la = ROUNDDOWN(start, PGSIZE);
+            uintptr_t la = ROUNDDOWN(start, PGSIZE); // 向下对齐到页边界
             while (start < end) {
+                // 分配物理页面并建立映射
                 struct Page *page = pgdir_alloc_page(mm->pgdir, la, perm);
                 if (page == NULL) {
-                    ret = -E_NO_MEM;
+                    ret = -E_NO_MEM; // 内存分配失败
                     goto bad_cleanup_mmap;
                 }
+                // 计算需要清零的偏移和大小
                 size_t off = start - la;
                 size_t size = PGSIZE - off;
                 la += PGSIZE;
                 if (end < la) {
                     size -= la - end;
                 }
+                // 将页面内容清零
                 memset((void *)(page2kva(page) + off), 0, size);
                 start += size;
             }
-            continue;
+            continue; // 处理下一个段
         }
         
-        // 分配页面并读取文件内容
-        off_t offset = ph->p_offset;
+        // --- 对于非纯 BSS 段：分配页面并从文件读取内容 ---
+        off_t offset = ph->p_offset;// 获取该段在文件中的偏移量
         size_t off, size;
+        // start: 段的起始虚拟地址
+        // la: 将起始地址向下对齐到页边界 (Page Align)，作为分配页面的基准
         uintptr_t start = ph->p_va, end, la = ROUNDDOWN(start, PGSIZE);
         
-        end = ph->p_va + ph->p_filesz;
+        // --- 处理文件内容部分 (TEXT/DATA) ---
+        // --- 将文件中的数据（代码或已初始化的全局变量）读入内存页 ---
+        end = ph->p_va + ph->p_filesz;//end 指向文件中实际数据的结束位置
+        // 循环读取文件中的数据
         while (start < end) {
+            // 为虚拟地址la分配物理页面并建立映射
             struct Page *page = pgdir_alloc_page(mm->pgdir, la, perm);
             if (page == NULL) {
                 ret = -E_NO_MEM;
                 goto bad_cleanup_mmap;
             }
+            // 计算页内偏移和读取大小
             off = start - la;
-            size = PGSIZE - off;
-            la += PGSIZE;
+            size = PGSIZE - off; // 默认读满剩下的半页或整页
+            la += PGSIZE; // 更新 la 到下一页的边界
             if (end < la) {
                 size -= la - end;
             }
+            // 从文件的offset位置中读取size字节的数据到新分配的内存页
             if ((ret = load_icode_read(fd, page2kva(page) + off, size, offset)) != 0) {
-                goto bad_cleanup_mmap;
+                goto bad_cleanup_mmap; // 读取失败
             }
+            // 更新 start 和 offset 以继续读取下一个块
             start += size;
             offset += size;
         }
         
-        // 处理 BSS 部分
+        // --- 处理 BSS 部分（如果有）：内存大小大于文件大小的部分 ---
+        // 重新定义 end 为该段在内存中的最终结束位置
         end = ph->p_va + ph->p_memsz;
+        
+        // 处理上一个页面的剩余部分，如果文件大小不是页对齐的，最后一页还没填满
+        // 但是 BSS 紧接着开始，那么这页剩余的空间必须清零
         if (start < la) {
             if (start == end) {
-                continue;
+                continue; // 刚好结束
             }
-            off = start + PGSIZE - la;
-            size = PGSIZE - off;
+            off = start + PGSIZE - la;// 计算在当前页内的起始清零位置
+            size = PGSIZE - off; // 计算需要清零的大小
             if (end < la) {
                 size -= la - end;
             }
+            // 将文件内容之后的内存部分清零（BSS 起始部分）
             memset(page2kva(get_page(mm->pgdir, start, NULL)) + off, 0, size);
             start += size;
             assert((end < la && start == end) || (end >= la && start == la));
         }
+        // 如果 BSS 很大，超出了刚才提到的“最后一页”
+        // 则处理剩余的 BSS 页面：分配新页并全清零
         while (start < end) {
+            // 分配物理页面并建立映射
             struct Page *page = pgdir_alloc_page(mm->pgdir, la, perm);
             if (page == NULL) {
                 ret = -E_NO_MEM;
                 goto bad_cleanup_mmap;
             }
+            // 整页都属于 BSS，所以计算出本页内需要清零的范围（通常是整页，除非是该段的最后几字节）
             off = start - la;
             size = PGSIZE - off;
             la += PGSIZE;
             if (end < la) {
                 size -= la - end;
             }
+            // 将本页内的 BSS 部分清零
             memset(page2kva(page) + off, 0, size);
             start += size;
         }
@@ -922,43 +957,48 @@ load_icode(int fd, int argc, char **kargv)
 
     
     // ==================== Step 4: 设置用户栈 ====================
+    // 用户栈通常位于用户空间的最高地址附近
     vm_flags = VM_READ | VM_WRITE | VM_STACK;
+    // 建立用户栈的 VMA，大约 1MB 大小
     if ((ret = mm_map(mm, USTACKTOP - USTACKSIZE, USTACKSIZE, vm_flags, NULL)) != 0) {
         goto bad_cleanup_mmap;
     }
+    // 立即分配几页物理内存给用户栈，防止缺页异常（虽然也可以按需分配，但这里为了简单直接分配了）
     assert(pgdir_alloc_page(mm->pgdir, USTACKTOP - PGSIZE, PTE_USER) != NULL);
     assert(pgdir_alloc_page(mm->pgdir, USTACKTOP - 2*PGSIZE, PTE_USER) != NULL);
     assert(pgdir_alloc_page(mm->pgdir, USTACKTOP - 3*PGSIZE, PTE_USER) != NULL);
     assert(pgdir_alloc_page(mm->pgdir, USTACKTOP - 4*PGSIZE, PTE_USER) != NULL);
     
     // ==================== Step 5: 更新进程状态 ====================
-    mm_count_inc(mm);
-    current->mm = mm; // 设置当前进程的mm
+    mm_count_inc(mm); // 增加 mm 的引用计数
+    current->mm = mm; // 设置当前进程的 mm 结构
     current->pgdir = PADDR(mm->pgdir); // 设置页目录物理地址
-    lsatp(PADDR(mm->pgdir)); // 切换页表
+    lsatp(PADDR(mm->pgdir)); // 切换页表，激活新的地址空间
+    // 刷新 TLB 已经在 lsatp 中隐含或者是必要的下一步操作，但这里 lsatp 写入 satp 寄存器会生效
     
-    // ==================== Step 6: 设置 argc/argv 到用户栈 ====================
-    // 注意：此时已经切换页表，但我们需要通过内核态地址来写入用户栈
-    // 使用 page2kva 获取对应用户虚拟地址的内核虚拟地址
+    // ==================== Step 6: 设置命令行参数 argc/argv 到用户栈 ====================
+    // 从而当用户程序启动时，可以通过 main 函数的参数获取命令行参数
+    // 注意：此时已经切换页表，当前是在内核态，但我们需要写入用户栈
+    // 这里的 stacktop 是用户虚拟地址
     
     uintptr_t stacktop = USTACKTOP;
     
-    // 首先将参数字符串复制到用户栈（从栈顶向下）
-    uintptr_t argv_ptrs[EXEC_MAX_ARG_NUM];
+    // 6.1: 将参数字符串复制到用户栈（从栈顶向下增长）
+    uintptr_t argv_ptrs[EXEC_MAX_ARG_NUM]; // 用于保存每个参数字符串在用户栈中的地址
     for (int i = argc - 1; i >= 0; i--) {
-        size_t len = strlen(kargv[i]) + 1;  // 包含 '\0'
+        size_t len = strlen(kargv[i]) + 1;  // 包含 '\0' 的长度
         stacktop -= len;
-        // 获取对应用户虚拟地址的内核虚拟地址
+        // 使用 get_page 获取对应的物理页，再转换为内核虚拟地址以便写入
         struct Page *page = get_page(mm->pgdir, stacktop, NULL);
         uintptr_t kva = (uintptr_t)page2kva(page) + (stacktop & (PGSIZE - 1));
-        strcpy((char *)kva, kargv[i]);
-        argv_ptrs[i] = stacktop;  // 保存用户态虚拟地址
+        strcpy((char *)kva, kargv[i]); // 复制字符串内容
+        argv_ptrs[i] = stacktop;  // 记录该参数在用户栈中的起始地址，用于构造 argv 数组
     }
     
-    // 对齐到 8 字节边界
+    // 6.2: 参数指针数组需要指针对齐 (通常为 8 字节/64位系统)
     stacktop = ROUNDDOWN(stacktop, sizeof(uintptr_t));
     
-    // 压入 argv[argc] = NULL
+    // 6.3: 压入 argv[argc] = NULL (C 语言约定：argv 最后一个元素必须是 NULL，表示参数结束)
     stacktop -= sizeof(uintptr_t);
     {
         struct Page *page = get_page(mm->pgdir, stacktop, NULL);
@@ -966,17 +1006,21 @@ load_icode(int fd, int argc, char **kargv)
         *(uintptr_t *)kva = 0;
     }
     
-    // 压入 argv 指针数组（从后往前）
+    // 6.4: 压入 argv 指针数组（从后往前压，这样 argv[0] 在最低地址）
+    // 实际上是构建 argv 数组的内容。argv[0] 指向第一个字符串，argv[1] 指向第二个...
+    // 这样 main 函数的 argv 参数就能正确指向每个字符串
     for (int i = argc - 1; i >= 0; i--) {
         stacktop -= sizeof(uintptr_t);
         struct Page *page = get_page(mm->pgdir, stacktop, NULL);
         uintptr_t kva = (uintptr_t)page2kva(page) + (stacktop & (PGSIZE - 1));
-        *(uintptr_t *)kva = argv_ptrs[i];
+        *(uintptr_t *)kva = argv_ptrs[i]; // 写入字符串的地址
     }
     
+    // 记录 argv 数组本身的起始地址（即二级指针 char **argv 的值）
     uintptr_t uargv = stacktop;
     
-    // 压入 argc（可选，因为 argc 也通过 a0 传递）
+    // 6.5: 压入 argc (虽然 RISC-V 通过寄存器 a0 传递，但有些实现也压栈)
+    // 这里为了兼容性或者特定的 ABI 规范
     stacktop -= sizeof(uintptr_t);
     {
         struct Page *page = get_page(mm->pgdir, stacktop, NULL);
@@ -987,25 +1031,27 @@ load_icode(int fd, int argc, char **kargv)
     // ==================== Step 7: 设置 trapframe ====================
     struct trapframe *tf = current->tf;
     
+    // 清空中断帧，准备新的上下文
     memset(tf, 0, sizeof(struct trapframe));
-    tf->gpr.sp = stacktop;
-    tf->gpr.a0 = argc;
-    tf->gpr.a1 = uargv;
-    tf->epc = elf->e_entry; // 入口点
-    tf->status = (read_csr(sstatus) | SSTATUS_SPIE) & ~SSTATUS_SPP; // 设置状态，用户态
+    tf->gpr.sp = stacktop; // 设置用户栈指针
+    tf->gpr.a0 = argc;     // 设置系统调用参数/程序入口参数 a0 = argc
+    tf->gpr.a1 = uargv;    // 设置系统调用参数/程序入口参数 a1 = argv
+    tf->epc = elf->e_entry; // 设置程序入口点 (Entry Point Counter)
+    // 设置处理器状态：SSTATUS_SPIE 表示之前中断是开启的，SSTATUS_SPP=0 表示返回用户模式
+    tf->status = (read_csr(sstatus) | SSTATUS_SPIE) & ~SSTATUS_SPP; 
     
     // ==================== Step 8: 关闭文件 ====================
-    sysfile_close(fd);
+    sysfile_close(fd); // 加载完毕，关闭文件描述符
     
     ret = 0;
     return ret;
     
 bad_cleanup_mmap:
-    exit_mmap(mm);
+    exit_mmap(mm); // 释放映射
 bad_elf_cleanup_pgdir:
-    put_pgdir(mm);
+    put_pgdir(mm); // 释放页目录
 bad_pgdir_cleanup_mm:
-    mm_destroy(mm);
+    mm_destroy(mm); // 销毁 mm 结构
 bad_mm:
     return ret;
 }
@@ -1052,8 +1098,6 @@ failed_cleanup:
     return ret;
 }
 
-// do_execve - call exit_mmap(mm)&put_pgdir(mm) to reclaim memory space of current process
-//           - call load_icode to setup new memory space accroding binary prog.
 // do_execve - 调用exit_mmap(mm)&put_pgdir(mm)来回收当前进程的内存空间
 //           - 调用load_icode根据二进制程序设置新的内存空间。
 int do_execve(const char *name, int argc, const char **argv)
@@ -1129,7 +1173,6 @@ execve_exit:
     panic("already exit: %e.\n", ret);
 }
 
-// do_yield - ask the scheduler to reschedule
 // do_yield - 请求调度器重新调度
 int do_yield(void)
 {
@@ -1137,9 +1180,6 @@ int do_yield(void)
     return 0;
 }
 
-// do_wait - wait one OR any children with PROC_ZOMBIE state, and free memory space of kernel stack
-//         - proc struct of this child.
-// NOTE: only after do_wait function, all resources of the child proces are free.
 // do_wait - 等待一个或任意一个状态为PROC_ZOMBIE的子进程，并释放内核栈的内存空间
 //         - 该子进程的proc struct。
 // 注意：只有在do_wait函数之后，子进程的所有资源才被释放。
@@ -1214,7 +1254,6 @@ found:
     kfree(proc);
     return 0;
 }
-// do_kill - kill process with pid by set this process's flags with PF_EXITING
 // do_kill - 通过设置进程标志为PF_EXITING来杀死指定pid的进程
 int do_kill(int pid)
 {
@@ -1235,7 +1274,6 @@ int do_kill(int pid)
     return -E_INVAL;
 }
 
-// kernel_execve - build a new trapframe, execute do_execve in-kernel, and return to user mode via __trapret
 // kernel_execve - 构建新的中断帧，在内核中执行do_execve，并通过__trapret返回用户模式
 static int
 kernel_execve(const char *name, const char **argv)
@@ -1274,7 +1312,6 @@ kernel_execve(const char *name, const char **argv)
 
 #define KERNEL_EXECVE3(x, s, ...) __KERNEL_EXECVE3(x, s, ##__VA_ARGS__)
 
-// user_main - kernel thread used to exec a user program
 // user_main - 用于执行用户程序的内核线程
 static int
 user_main(void *arg)
@@ -1291,7 +1328,6 @@ user_main(void *arg)
     panic("user_main execve failed.\n");
 }
 
-// init_main - the second kernel thread used to create user_main kernel threads
 // init_main - 第二个内核线程，用于创建user_main内核线程
 static int
 init_main(void *arg)
@@ -1329,8 +1365,6 @@ init_main(void *arg)
     return 0;
 }
 
-// proc_init - set up the first kernel thread idleproc "idle" by itself and
-//           - create the second kernel thread init_main
 // proc_init - 设置第一个内核线程idleproc "idle"
 //           - 创建第二个内核线程init_main
 void proc_init(void)
@@ -1381,7 +1415,6 @@ void proc_init(void)
     assert(initproc != NULL && initproc->pid == 1);
 }
 
-// cpu_idle - at the end of kern_init, the first kernel thread idleproc will do below works
 // cpu_idle - 在kern_init结束时，第一个内核线程idleproc将做以下工作
 void cpu_idle(void)
 {
@@ -1393,7 +1426,6 @@ void cpu_idle(void)
         }
     }
 }
-// FOR LAB6, set the process's priority (bigger value will get more CPU time)
 // 对于LAB6，设置进程的优先级（值越大获得的CPU时间越多）
 void lab6_set_priority(uint32_t priority)
 {
@@ -1403,8 +1435,6 @@ void lab6_set_priority(uint32_t priority)
     else
         current->lab6_priority = priority;
 }
-// do_sleep - set current process state to sleep and add timer with "time"
-//          - then call scheduler. if process run again, delete timer first.
 // do_sleep - 设置当前进程状态为睡眠，并添加带有"time"的定时器
 //          - 然后调用调度器。如果进程再次运行，首先删除定时器。
 int do_sleep(unsigned int time)

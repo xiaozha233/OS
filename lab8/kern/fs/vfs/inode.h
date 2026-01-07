@@ -32,17 +32,17 @@ struct iobuf;
  */
 struct inode {
     union {
-        struct device __device_info;
-        struct sfs_inode __sfs_inode_info;
+        struct device __device_info;        // 设备相关信息（如果是设备文件）
+        struct sfs_inode __sfs_inode_info;  // SFS 文件系统特定信息（如果是普通文件或目录）
     } in_info;
     enum {
-        inode_type_device_info = 0x1234,
-        inode_type_sfs_inode_info,
-    } in_type;
-    int ref_count;
-    int open_count;
-    struct fs *in_fs;
-    const struct inode_ops *in_ops;
+        inode_type_device_info = 0x1234,    // 标识为设备文件类型
+        inode_type_sfs_inode_info,          // 标识为 SFS 文件系统类型
+    } in_type;                              // inode 类型标识
+    int ref_count;                          // 内存引用计数，当为0时可能会回收此 inode
+    int open_count;                         // 文件的打开计数，用于追踪有多少进程打开了此文件
+    struct fs *in_fs;                       // 指向所属文件系统的抽象结构 struct fs
+    const struct inode_ops *in_ops;         // 指向该 inode 对应的操作函数表（如 read, write 等）
 };
 
 #define __in_type(type)                                             inode_type_##type##_info

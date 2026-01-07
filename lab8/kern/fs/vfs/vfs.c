@@ -12,7 +12,6 @@ static struct inode *bootfs_node = NULL; // 启动文件系统inode
 
 extern void vfs_devlist_init(void);
 
-// __alloc_fs - allocate memory for fs, and set fs type
 // __alloc_fs - 为fs分配内存，并设置fs类型
 struct fs *
 __alloc_fs(int type) {
@@ -23,7 +22,6 @@ __alloc_fs(int type) {
     return fs;
 }
 
-// vfs_init -  vfs initialize
 // vfs_init - vfs初始化
 void
 vfs_init(void) {
@@ -31,20 +29,17 @@ vfs_init(void) {
     vfs_devlist_init(); // 初始化设备列表
 }
 
-// lock_bootfs - lock  for bootfs
 // lock_bootfs - 为bootfs加锁
 static void
 lock_bootfs(void) {
     down(&bootfs_sem);
 }
-// ulock_bootfs - ulock for bootfs
 // unlock_bootfs - 为bootfs解锁
 static void
 unlock_bootfs(void) {
     up(&bootfs_sem);
 }
 
-// change_bootfs - set the new fs inode 
 // change_bootfs - 设置新的fs inode
 static void
 change_bootfs(struct inode *node) {
@@ -59,7 +54,6 @@ change_bootfs(struct inode *node) {
     }
 }
 
-// vfs_set_bootfs - change the dir of file system
 // vfs_set_bootfs - 改变文件系统的目录
 int
 vfs_set_bootfs(char *fsname) {
@@ -81,7 +75,6 @@ vfs_set_bootfs(char *fsname) {
     return 0;
 }
 
-// vfs_get_bootfs - get the inode of bootfs
 // vfs_get_bootfs - 获取bootfs的inode
 int
 vfs_get_bootfs(struct inode **node_store) {
