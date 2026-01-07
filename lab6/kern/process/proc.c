@@ -130,7 +130,7 @@ alloc_proc(void)
         proc->yptr = NULL; // 初始化更年轻的兄弟进程
         proc->optr = NULL; // 初始化更老的兄弟进程
 
-        // LAB6:YOUR CODE (update LAB5 steps)
+        // LAB6:2314035 (update LAB5 steps)
         /*
          * below fields(add in LAB6) in proc_struct need to be initialized
          *       struct run_queue *rq;                       // run queue contains Process

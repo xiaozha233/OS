@@ -8,7 +8,7 @@
 #define USE_SKEW_HEAP 1
 
 /* You should define the BigStride constant here*/
-/* LAB6 CHALLENGE 1: YOUR CODE */
+/* LAB6 CHALLENGE 1: 2314076 */
 /* BIG_STRIDE 应该取一个合适的值，使得在32位无符号整数下比较正确
  * 由于 priority >= 1，我们需要 BIG_STRIDE <= 2^31 - 1
  * 选择 0x7FFFFFFF 作为最大值
@@ -59,12 +59,7 @@ proc_stride_comp_f(void *a, void *b)
 static void
 stride_init(struct run_queue *rq)
 {
-     /* LAB6 CHALLENGE 1: YOUR CODE
-      * (1) init the ready process list: rq->run_list
-      * (2) init the run pool: rq->lab6_run_pool
-      * (3) set number of process: rq->proc_num to 0
-      */
-     /* LAB6 挑战 1: 你的代码
+     /* LAB6 CHALLENGE 1: 2313255
       * (1) 初始化就绪进程列表: rq->run_list
       * (2) 初始化运行池: rq->lab6_run_pool
       * (3) 设置进程数: rq->proc_num 为 0
@@ -74,19 +69,7 @@ stride_init(struct run_queue *rq)
      rq->proc_num = 0; // 初始化进程数
 }
 
-/*
- * stride_enqueue inserts the process ``proc'' into the run-queue
- * ``rq''. The procedure should verify/initialize the relevant members
- * of ``proc'', and then put the ``lab6_run_pool'' node into the
- * queue(since we use priority queue here). The procedure should also
- * update the meta date in ``rq'' structure.
- *
- * proc->time_slice denotes the time slices allocation for the
- * process, which should set to rq->max_time_slice.
- *
- * hint: see libs/skew_heap.h for routines of the priority
- * queue structures.
- */
+
 /*
  * stride_enqueue 将进程 ``proc'' 插入运行队列 ``rq''。
  * 该过程应验证/初始化 ``proc'' 的相关成员，然后将 ``lab6_run_pool'' 节点
@@ -99,16 +82,8 @@ stride_init(struct run_queue *rq)
 static void
 stride_enqueue(struct run_queue *rq, struct proc_struct *proc)
 {
-     /* LAB6 CHALLENGE 1: YOUR CODE
-      * (1) insert the proc into rq correctly
-      * NOTICE: you can use skew_heap or list. Important functions
-      *         skew_heap_insert: insert a entry into skew_heap
-      *         list_add_before: insert  a entry into the last of list
-      * (2) recalculate proc->time_slice
-      * (3) set proc->rq pointer to rq
-      * (4) increase rq->proc_num
-      */
-     /* LAB6 挑战 1: 你的代码
+
+     /* LAB6 CHALLENGE 1: 2314035
       * (1) 正确地将 proc 插入 rq
       * 注意: 可以使用 skew_heap 或 list。重要函数：
       *         skew_heap_insert: 将条目插入 skew_heap
@@ -152,13 +127,8 @@ stride_enqueue(struct run_queue *rq, struct proc_struct *proc)
 static void
 stride_dequeue(struct run_queue *rq, struct proc_struct *proc)
 {
-     /* LAB6 CHALLENGE 1: YOUR CODE
-      * (1) remove the proc from rq correctly
-      * NOTICE: you can use skew_heap or list. Important functions
-      *         skew_heap_remove: remove a entry from skew_heap
-      *         list_del_init: remove a entry from the  list
-      */
-     /* LAB6 挑战 1: 你的代码
+
+     /* LAB6 CHALLENGE 1: 2314035
       * (1) 从 rq 中正确移除 proc
       * 注意: 可以使用 skew_heap 或 list。重要函数：
       *         skew_heap_remove: 从 skew_heap 中移除条目
@@ -200,14 +170,8 @@ stride_dequeue(struct run_queue *rq, struct proc_struct *proc)
 static struct proc_struct *
 stride_pick_next(struct run_queue *rq)
 {
-     /* LAB6 CHALLENGE 1: YOUR CODE
-      * (1) get a  proc_struct pointer p  with the minimum value of stride
-             (1.1) If using skew_heap, we can use le2proc get the p from rq->lab6_run_pol
-             (1.2) If using list, we have to search list to find the p with minimum stride value
-      * (2) update p;s stride value: p->lab6_stride
-      * (3) return p
-      */
-     /* LAB6 挑战 1: 你的代码
+
+     /* LAB6 CHALLENGE 1: 2314076
       * (1) 获取 stride 值最小的 proc_struct 指针 p
              (1.1) 如果使用 skew_heap，我们可以使用 le2proc 从 rq->lab6_run_pol 获取 p
              (1.2) 如果使用 list，我们必须搜索 list 以找到具有最小 stride 值的 p

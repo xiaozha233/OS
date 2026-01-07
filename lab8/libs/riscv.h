@@ -245,6 +245,9 @@ static inline void
 lsatp(unsigned long pgdir)
 {
   write_csr(satp, 0x8000000000000000 | (pgdir >> RISCV_PGSHIFT));
+  // satp switch with ASID=0 must be followed by a global TLB flush,
+  // otherwise stale translations may be used across address spaces.
+  asm volatile("sfence.vma" ::: "memory");
 }
 
 #endif

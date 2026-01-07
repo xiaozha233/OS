@@ -1,3 +1,9 @@
+/*
+ * inode.h 定义了抽象的索引节点（inode）结构体和相关操作。
+ * Inode 是文件（包括设备文件）的抽象表示，它提供了一个接口，
+ * 使得内核的文件系统无关代码能够与多种底层文件系统代码进行交互。
+ */
+
 #ifndef __KERN_FS_VFS_INODE_H__
 #define __KERN_FS_VFS_INODE_H__
 
@@ -11,20 +17,18 @@ struct stat;
 struct iobuf;
 
 /*
- * A struct inode is an abstract representation of a file.
+ * 结构体 inode 是文件的抽象表示。
  *
- * It is an interface that allows the kernel's filesystem-independent 
- * code to interact usefully with multiple sets of filesystem code.
+ * 它是一个接口，允许内核的文件系统无关代码有效地与多组文件系统代码交互。
  */
 
 /*
- * Abstract low-level file.
+ * 抽象的低级文件。
  *
- * Note: in_info is Filesystem-specific data, in_type is the inode type
+ * 注意：in_info 是特定于文件系统的数据，in_type 是 inode 类型
  *
- * open_count is managed using VOP_INCOPEN and VOP_DECOPEN by
- * vfs_open() and vfs_close(). Code above the VFS layer should not
- * need to worry about it.
+ * open_count 由 vfs_open() 和 vfs_close() 使用 VOP_INCOPEN 和 VOP_DECOPEN 进行管理。
+ * VFS 层之上的代码不应该担心它。
  */
 struct inode {
     union {
@@ -74,100 +78,74 @@ void inode_kill(struct inode *node);
 #define VOP_MAGIC                           0x8c4ba476
 
 /*
- * Abstract operations on a inode.
+ * 对 inode 的抽象操作。
  *
- * These are used in the form VOP_FOO(inode, args), which are macros
- * that expands to inode->inode_ops->vop_foo(inode, args). The operations
- * "foo" are:
+ * 这些操作以 VOP_FOO(inode, args) 的形式使用，它们是宏，
+ * 扩展为 inode->inode_ops->vop_foo(inode, args)。操作 "foo" 包括：
  *
- *    vop_open        - Called on open() of a file. Can be used to
- *                      reject illegal or undesired open modes. Note that
- *                      various operations can be performed without the
- *                      file actually being opened.
- *                      The inode need not look at O_CREAT, O_EXCL, or 
- *                      O_TRUNC, as these are handled in the VFS layer.
+ *    vop_open        - 在 open() 文件时调用。可用于拒绝非法或不期望的打开模式。
+ *                      注意，可以在不实际打开文件的情况下执行各种操作。
+ *                      inode 不需要查看 O_CREAT、O_EXCL 或 O_TRUNC，
+ *                      因为这些是在 VFS 层处理的。
  *
- *                      VOP_EACHOPEN should not be called directly from
- *                      above the VFS layer - use vfs_open() to open inodes.
- *                      This maintains the open count so VOP_LASTCLOSE can
- *                      be called at the right time.
+ *                      VOP_EACHOPEN 不应从 VFS 层之上直接调用 - 使用 vfs_open() 打开 inode。
+ *                      这维护了打开计数，以便可以在正确的时间调用 VOP_LASTCLOSE。
  *
- *    vop_close       - To be called on *last* close() of a file.
+ *    vop_close       - 在文件的 *最后一次* close() 时调用。
  *
- *                      VOP_LASTCLOSE should not be called directly from
- *                      above the VFS layer - use vfs_close() to close
- *                      inodes opened with vfs_open().
+ *                      VOP_LASTCLOSE 不应从 VFS 层之上直接调用 - 使用 vfs_close() 关闭
+ *                      用 vfs_open() 打开的 inode。
  *
- *    vop_reclaim     - Called when inode is no longer in use. Note that
- *                      this may be substantially after vop_lastclose is
- *                      called.
+ *    vop_reclaim     - 当 inode 不再使用时调用。注意，这可能在 vop_lastclose 被调用后很久才发生。
  *
  *****************************************
  *
- *    vop_read        - Read data from file to uio, at offset specified
- *                      in the uio, updating uio_resid to reflect the
- *                      amount read, and updating uio_offset to match.
- *                      Not allowed on directories or symlinks.
+ *    vop_read        - 将数据从文件读入 uio，偏移量在 uio 中指定，
+ *                      更新 uio_resid 以反映读取的数量，并更新 uio_offset 以匹配。
+ *                      不允许在目录或符号链接上使用。
  *
- *    vop_getdirentry - Read a single filename from a directory into a
- *                      uio, choosing what name based on the offset
- *                      field in the uio, and updating that field.
- *                      Unlike with I/O on regular files, the value of
- *                      the offset field is not interpreted outside
- *                      the filesystem and thus need not be a byte
- *                      count. However, the uio_resid field should be
- *                      handled in the normal fashion.
- *                      On non-directory objects, return ENOTDIR.
+ *    vop_getdirentry - 将单个文件名从目录读入 uio，根据 uio 中的 offset 字段选择名称，
+ *                      并更新该字段。
+ *                      与普通文件上的 I/O 不同，offset 字段的值不在文件系统之外解释，
+ *                      因此不必是字节计数。但是，uio_resid 字段应该以正常方式处理。
+ *                      在非目录对象上，返回 ENOTDIR。
  *
- *    vop_write       - Write data from uio to file at offset specified
- *                      in the uio, updating uio_resid to reflect the
- *                      amount written, and updating uio_offset to match.
- *                      Not allowed on directories or symlinks.
+ *    vop_write       - 将数据从 uio 写入文件，偏移量在 uio 中指定，
+ *                      更新 uio_resid 以反映写入的数量，并更新 uio_offset 以匹配。
+ *                      不允许在目录或符号链接上使用。
  *
- *    vop_ioctl       - Perform ioctl operation OP on file using data
- *                      DATA. The interpretation of the data is specific
- *                      to each ioctl.
+ *    vop_ioctl       - 使用数据 DATA 对文件执行 ioctl 操作 OP。
+ *                      数据的解释主要取决于每个 ioctl。
  *
- *    vop_fstat        -Return info about a file. The pointer is a 
- *                      pointer to struct stat; see stat.h.
+ *    vop_fstat       - 返回有关文件的信息。指针是指向 struct stat 的指针；参见 stat.h。
  *
- *    vop_gettype     - Return type of file. The values for file types
- *                      are in sfs.h.
+ *    vop_gettype     - 返回文件类型。文件类型的值在 sfs.h 中。
  *
- *    vop_tryseek     - Check if seeking to the specified position within
- *                      the file is legal. (For instance, all seeks
- *                      are illegal on serial port devices, and seeks
- *                      past EOF on files whose sizes are fixed may be
- *                      as well.)
+ *    vop_tryseek     - 检查查找到文件内的指定位置是否合法。（例如，所有查找
+ *                      在串口设备上都是非法的，并且在大小固定的文件上查找超过 EOF
+ *                      可能也是非法的。）
  *
- *    vop_fsync       - Force any dirty buffers associated with this file
- *                      to stable storage.
+ *    vop_fsync       - 强制与此文件关联的所有脏缓冲区写入稳定存储。
  *
- *    vop_truncate    - Forcibly set size of file to the length passed
- *                      in, discarding any excess blocks.
+ *    vop_truncate    - 强制将文件大小设置为传入的长度，丢弃任何多余的块。
  *
- *    vop_namefile    - Compute pathname relative to filesystem root
- *                      of the file and copy to the specified io buffer. 
- *                      Need not work on objects that are not
- *                      directories.
+ *    vop_namefile    - 计算文件相对于文件系统根目录的路径名，并复制到指定的 io 缓冲区。
+ *                      不需要在非目录对象上工作。
  *
  *****************************************
  *
- *    vop_creat       - Create a regular file named NAME in the passed
- *                      directory DIR. If boolean EXCL is true, fail if
- *                      the file already exists; otherwise, use the
- *                      existing file if there is one. Hand back the
- *                      inode for the file as per vop_lookup.
+ *    vop_creat       - 在传递的目录 DIR 中创建一个名为 NAME 的常规文件。
+ *                      如果布尔值 EXCL 为 true，如果文件已存在则失败；否则，
+ *                      如果有现有文件则使用它。按照 vop_lookup 返回文件的 inode。
  *
  *****************************************
  *
- *    vop_lookup      - Parse PATHNAME relative to the passed directory
- *                      DIR, and hand back the inode for the file it
- *                      refers to. May destroy PATHNAME. Should increment
- *                      refcount on inode handed back.
+ *    vop_lookup      - 解析相对于传递的目录 DIR 的 PATHNAME，并返回它引用的文件的 inode。
+ *                      可能会破坏 PATHNAME。应该增加返回的 inode 的引用计数。
  */
+// 索引节点操作表
 struct inode_ops {
-    unsigned long vop_magic;
+    unsigned long vop_magic;   // 魔数，验证结构体有效性
     int (*vop_open)(struct inode *node, uint32_t open_flags);
     int (*vop_close)(struct inode *node);
     int (*vop_read)(struct inode *node, struct iobuf *iob);
@@ -186,7 +164,7 @@ struct inode_ops {
 };
 
 /*
- * Consistency check
+ * 一致性检查
  */
 void inode_check(struct inode *node, const char *opstr);
 
@@ -220,15 +198,15 @@ void inode_check(struct inode *node, const char *opstr);
 #define vop_kill(node)                                              inode_kill(node)
 
 /*
- * Reference count manipulation (handled above filesystem level)
+ * 引用计数操作（在文件系统层之上处理）
  */
 #define vop_ref_inc(node)                                           inode_ref_inc(node)
 #define vop_ref_dec(node)                                           inode_ref_dec(node)
 /*
- * Open count manipulation (handled above filesystem level)
+ * 打开计数操作（在文件系统层之上处理）
  *
- * VOP_INCOPEN is called by vfs_open. VOP_DECOPEN is called by vfs_close.
- * Neither of these should need to be called from above the vfs layer.
+ * VOP_INCOPEN 由 vfs_open 调用。VOP_DECOPEN 由 vfs_close 调用。
+ * 这两个都不应该需要在 vfs 层之上被调用。
  */
 #define vop_open_inc(node)                                          inode_open_inc(node)
 #define vop_open_dec(node)                                          inode_open_dec(node)

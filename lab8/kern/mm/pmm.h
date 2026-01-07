@@ -169,7 +169,15 @@ static inline void flush_tlb()
 // construct PTE from a page and permission bits
 static inline pte_t pte_create(uintptr_t ppn, int type)
 {
-    return (ppn << PTE_PPN_SHIFT) | PTE_V | type;
+    // RISC-V page tables use Accessed (A) / Dirty (D) bits.
+    // If A=0, any access can raise a page fault; if D=0, stores can fault.
+    // This lab does not implement a full software-managed A/D fault handler,
+    // so we eagerly set A for all mappings and set D when the mapping is writable.
+    pte_t pte = (ppn << PTE_PPN_SHIFT) | PTE_V | type | PTE_A;
+    if (type & PTE_W) {
+        pte |= PTE_D;
+    }
+    return pte;
 }
 
 static inline pte_t ptd_create(uintptr_t ppn)

@@ -132,7 +132,7 @@ alloc_proc(void)
          *       uint32_t lab6_priority;                     // priority value (lab6 stride)
          */
 
-        //LAB8 YOUR CODE : (update LAB6 steps)
+        //LAB8 2314076 : (update LAB6 steps)
         /*
          * below fields(add in LAB6) in proc_struct need to be initialized
          *       struct files_struct * filesp;                file struct point        
@@ -279,7 +279,7 @@ void proc_run(struct proc_struct *proc)
         *   lcr3():                   Modify the value of CR3 register
         *   switch_to():              Context switching between two processes
         */
-    //LAB8 2210769 : (update LAB4 steps)
+    //LAB8 2313255 : (update LAB4 steps)
       /*
        * below fields(add in LAB6) in proc_struct need to be initialized
        *       before switch_to();you should flush the tlb
@@ -558,7 +558,7 @@ int do_fork(uint32_t clone_flags, uintptr_t stack, struct trapframe *tf)
         goto fork_out;
     }
     ret = -E_NO_MEM;
-    // LAB8:EXERCISE2 YOUR CODE  HINT:how to copy the fs in parent's proc_struct?
+    // LAB8:EXERCISE2 2313255 HINT:how to copy the fs in parent's proc_struct?
     // LAB4:填写你在lab4中实现的代码
     /*
      * Some Useful MACROs, Functions and DEFINEs, you can use them in below implementation.
@@ -748,7 +748,7 @@ load_icode_read(int fd, void *buf, size_t len, off_t offset)
 static int
 load_icode(int fd, int argc, char **kargv)
 {
-    /* LAB8:EXERCISE2 2210769  HINT:how to load the file with handler fd  in to process's memory? how to setup argc/argv?
+    /* LAB8:EXERCISE2 2314076  HINT:how to load the file with handler fd  in to process's memory? how to setup argc/argv?
      * MACROs or Functions:
      *  mm_create        - create a mm
      *  setup_pgdir      - setup pgdir in mm
@@ -813,7 +813,10 @@ load_icode(int fd, int argc, char **kargv)
             ret = -E_INVAL_ELF;
             goto bad_cleanup_mmap;
         }
-        if (ph->p_filesz == 0) {
+        // NOTE: A PT_LOAD segment may be pure BSS (p_filesz == 0, p_memsz > 0).
+        // We must still map it and allocate/zero pages, otherwise user programs
+        // will fault when touching global variables.
+        if (ph->p_memsz == 0) {
             continue;
         }
         
@@ -833,9 +836,31 @@ load_icode(int fd, int argc, char **kargv)
             perm |= PTE_R;  // 可读
         }
         
-        // 创建 VMA
+        // 创建 VMA（覆盖 TEXT/DATA/BSS）
         if ((ret = mm_map(mm, ph->p_va, ph->p_memsz, vm_flags, NULL)) != 0) {
             goto bad_cleanup_mmap;
+        }
+
+        // 纯 BSS 段：直接分配并清零
+        if (ph->p_filesz == 0) {
+            uintptr_t start = ph->p_va, end = ph->p_va + ph->p_memsz;
+            uintptr_t la = ROUNDDOWN(start, PGSIZE);
+            while (start < end) {
+                struct Page *page = pgdir_alloc_page(mm->pgdir, la, perm);
+                if (page == NULL) {
+                    ret = -E_NO_MEM;
+                    goto bad_cleanup_mmap;
+                }
+                size_t off = start - la;
+                size_t size = PGSIZE - off;
+                la += PGSIZE;
+                if (end < la) {
+                    size -= la - end;
+                }
+                memset((void *)(page2kva(page) + off), 0, size);
+                start += size;
+            }
+            continue;
         }
         
         // 分配页面并读取文件内容
@@ -894,6 +919,7 @@ load_icode(int fd, int argc, char **kargv)
             start += size;
         }
     }
+
     
     // ==================== Step 4: 设置用户栈 ====================
     vm_flags = VM_READ | VM_WRITE | VM_STACK;

@@ -461,7 +461,7 @@ int copy_range(pde_t *to, pde_t *from, uintptr_t start, uintptr_t end,
             struct Page *npage = alloc_page();
             assert(page != NULL);
             assert(npage != NULL);
-            int ret = 0;
+            int ret;
             /* LAB5:填写你在lab5中实现的代码
              * replicate content of page to npage, build the map of phy addr of
              * nage with the linear addr start
@@ -480,8 +480,19 @@ int copy_range(pde_t *to, pde_t *from, uintptr_t start, uintptr_t end,
              * (3) memory copy from src_kvaddr to dst_kvaddr, size is PGSIZE
              * (4) build the map of phy addr of  nage with the linear addr start
              */
-            
-            assert(ret == 0);
+            void *src_kvaddr = page2kva(page);
+            void *dst_kvaddr = page2kva(npage);
+            memcpy(dst_kvaddr, src_kvaddr, PGSIZE);
+
+            ret = page_insert(to, npage, start, perm);
+            if (ret != 0)
+            {
+                free_page(npage);
+                return ret;
+            }
+
+            // keep nptep in sync for callers that may rely on it
+            (void)nptep;
         }
         start += PGSIZE;
     } while (start != 0 && start < end);

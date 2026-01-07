@@ -122,6 +122,12 @@ _restore_context:
 __alltraps:
     SAVE_ALL
 
+    # Allow S-mode to access U-mode pages during trap handling.
+    # This is required for copy_to_user/copy_from_user (memcpy touching user VA).
+    # sstatus will be restored from trapframe on return, so user mode won't keep SUM.
+    li t0, SSTATUS_SUM
+    csrs sstatus, t0
+
     move  a0, sp
     jal trap
     # sp should be the same as before "jal trap"

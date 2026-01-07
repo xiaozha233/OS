@@ -8,6 +8,7 @@
 #include <assert.h>
 #include <console.h>
 #include <vmm.h>
+#include <pmm.h>
 #include <kdebug.h>
 #include <unistd.h>
 #include <syscall.h>
@@ -18,6 +19,12 @@
 #include <proc.h>
 
 #define TICK_NUM 2
+
+// Temporary debug knobs for diagnosing input-triggered user faults.
+// Keep OFF for normal use.
+#define DEBUG_INJECT_CMD 0
+#define DEBUG_PANIC_ON_FETCH_PF 0
+
 
 static void print_ticks()
 {
@@ -125,6 +132,19 @@ void interrupt_handler(struct trapframe *tf)
         ++ticks;
         run_timer_list();
         dev_stdin_write(cons_getc());
+#if DEBUG_INJECT_CMD
+        // Inject "hello\n" once after boot to reproduce the fault without manual typing.
+        static const char cmd[] = "hello\n";
+        static int injected = 0;
+        static size_t idx = 0;
+        if (!injected && ticks > 20) {
+            if (idx < sizeof(cmd) - 1) {
+                dev_stdin_write(cmd[idx++]);
+            } else {
+                injected = 1;
+            }
+        }
+#endif
         break;
     case IRQ_H_TIMER:
         cprintf("Hypervisor software interrupt\n");
@@ -153,6 +173,7 @@ void kernel_execve_ret(struct trapframe *tf, uintptr_t kstacktop);
 void exception_handler(struct trapframe *tf)
 {
     int ret;
+    static int fetch_pf_once = 0;
     switch (tf->cause)
     {
     case CAUSE_MISALIGNED_FETCH:
@@ -197,6 +218,26 @@ void exception_handler(struct trapframe *tf)
         break;
     case CAUSE_FETCH_PAGE_FAULT:
         cprintf("Instruction page fault\n");
+#if DEBUG_PANIC_ON_FETCH_PF
+        if (fetch_pf_once++ == 0) {
+            print_trapframe(tf);
+            if (current != NULL && current->mm != NULL && current->mm->pgdir != NULL) {
+                uintptr_t va = (uintptr_t)tf->tval;
+                pte_t *ptep = get_pte(current->mm->pgdir, va, 0);
+                uintptr_t satp = read_csr(satp);
+                cprintf("  [fetch_pf] pid=%d name=%s satp=0x%08x va=0x%08x\n",
+                        current->pid, current->name, satp, va);
+                if (ptep != NULL) {
+                    cprintf("  [fetch_pf] ptep=%p pte=0x%08x\n", ptep, *ptep);
+                } else {
+                    cprintf("  [fetch_pf] ptep=NULL (no PTE)\n");
+                }
+            } else {
+                cprintf("  [fetch_pf] current/mm/pgdir unavailable\n");
+            }
+        }
+        panic("Instruction page fault");
+#endif
         break;
     case CAUSE_LOAD_PAGE_FAULT:
         cprintf("Load page fault\n");

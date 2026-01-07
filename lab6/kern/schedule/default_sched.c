@@ -17,7 +17,7 @@
 static void
 RR_init(struct run_queue *rq)
 {
-    // LAB6: YOUR CODE
+    // LAB6: 2313255
     list_init(&(rq->run_list));
     rq->proc_num = 0;
 }
@@ -36,7 +36,7 @@ RR_init(struct run_queue *rq)
 static void
 RR_enqueue(struct run_queue *rq, struct proc_struct *proc)
 {
-    // LAB6: YOUR CODE
+    // LAB6: 2314035
     assert(list_empty(&(proc->run_link)));
     // 将进程插入到队列尾部
     list_add_before(&(rq->run_list), &(proc->run_link));
@@ -59,7 +59,7 @@ RR_enqueue(struct run_queue *rq, struct proc_struct *proc)
 static void
 RR_dequeue(struct run_queue *rq, struct proc_struct *proc)
 {
-    // LAB6: YOUR CODE
+    // LAB6: 2314076
     assert(!list_empty(&(proc->run_link)) && proc->rq == rq);
     list_del_init(&(proc->run_link));
     rq->proc_num--;
@@ -76,7 +76,7 @@ RR_dequeue(struct run_queue *rq, struct proc_struct *proc)
 static struct proc_struct *
 RR_pick_next(struct run_queue *rq)
 {
-    // LAB6: YOUR CODE
+    // LAB6: 2313255
     list_entry_t *le = list_next(&(rq->run_list));
     if (le != &(rq->run_list))
     {
@@ -95,7 +95,7 @@ RR_pick_next(struct run_queue *rq)
 static void
 RR_proc_tick(struct run_queue *rq, struct proc_struct *proc)
 {
-    // LAB6: YOUR CODE
+    // LAB6: 2314076
     if (proc->time_slice > 0)
     {
         proc->time_slice--;

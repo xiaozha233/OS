@@ -141,7 +141,7 @@ void interrupt_handler(struct trapframe *tf)
             print_ticks();
         }
 
-        // lab6: YOUR CODE  (update LAB3 steps)
+        // lab6: 2314035  (update LAB3 steps)
         //  在时钟中断时调用调度器的 sched_class_proc_tick 函数
         sched_class_proc_tick(current);
 
